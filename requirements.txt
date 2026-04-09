@@ -1,0 +1,9 @@
+torch>=2.1.0
+torchvision>=0.16.0
+open-clip-torch>=2.24.0
+lancedb>=0.4.0
+pyarrow>=14.0.0
+opencv-python-headless>=4.8.0
+pillow>=10.0.0
+numpy<2.0.0
+tqdm>=4.65.0
