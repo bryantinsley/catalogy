@@ -1075,6 +1075,7 @@ dependencies = [
  "axum",
  "catalogy-catalog",
  "catalogy-core",
+ "catalogy-dedup",
  "catalogy-embed",
  "catalogy-extract",
  "catalogy-metadata",
@@ -1119,6 +1120,19 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "catalogy-dedup"
+version = "0.1.0"
+dependencies = [
+ "catalogy-catalog",
+ "catalogy-core",
+ "catalogy-queue",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1202,7 +1216,9 @@ dependencies = [
  "axum",
  "catalogy-catalog",
  "catalogy-core",
+ "catalogy-dedup",
  "catalogy-embed",
+ "catalogy-queue",
  "catalogy-search",
  "http-body-util",
  "mime_guess",

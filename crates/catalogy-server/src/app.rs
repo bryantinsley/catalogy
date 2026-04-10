@@ -20,6 +20,7 @@ struct StaticAssets;
 pub struct AppState {
     pub catalog: Arc<Catalog>,
     pub search_engine: Option<SearchEngine>,
+    pub state_db_path: Option<std::path::PathBuf>,
 }
 
 pub fn create_router(state: Arc<AppState>) -> Router {
@@ -28,6 +29,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/media/{id}", get(api::media_handler))
         .route("/api/thumb/{id}", get(api::thumb_handler))
         .route("/api/stats", get(api::stats_handler))
+        .route("/api/dedup", get(api::dedup_handler))
         .route("/", get(index_handler))
         .route("/{*path}", get(static_handler))
         .layer(CorsLayer::permissive())

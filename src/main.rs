@@ -88,6 +88,17 @@ enum Commands {
         port: u16,
     },
 
+    /// Detect duplicate media files
+    Dedup {
+        /// Detection tier: exact, visual, cross-video, all
+        #[arg(long, default_value = "all")]
+        tier: String,
+
+        /// Similarity threshold for visual dedup (0.0-1.0)
+        #[arg(long, default_value = "0.92")]
+        threshold: f32,
+    },
+
     /// Show or edit configuration
     Config,
 }
@@ -356,6 +367,45 @@ fn run_search(
     Ok(())
 }
 
+fn run_dedup(tier: &str, threshold: f32) -> Result<(), Box<dyn std::error::Error>> {
+    let run_exact = tier == "all" || tier == "exact";
+    let run_visual = tier == "all" || tier == "visual";
+    let run_cross = tier == "all" || tier == "cross-video";
+
+    if !run_exact && !run_visual && !run_cross {
+        eprintln!("Unknown tier: {tier}. Use: exact, visual, cross-video, or all");
+        std::process::exit(1);
+    }
+
+    if run_exact {
+        let db_path = default_state_db_path();
+        if !db_path.exists() {
+            println!("No state database found. Run `catalogy scan` first.");
+        } else {
+            let db = catalogy_queue::StateDb::open(&db_path)?;
+            let sets = catalogy_dedup::find_exact_duplicates(&db)?;
+            print!("{}", catalogy_dedup::format_exact_report(&sets));
+        }
+    }
+
+    if run_visual || run_cross {
+        let catalog_path_str = catalog_path().to_string_lossy().to_string();
+        let catalog = catalogy_catalog::Catalog::open(&catalog_path_str)?;
+
+        if run_visual {
+            let clusters = catalogy_dedup::find_visual_duplicates(&catalog, threshold)?;
+            print!("{}", catalogy_dedup::format_visual_report(&clusters));
+        }
+
+        if run_cross {
+            let dups = catalogy_dedup::find_cross_video_duplicates(&catalog, threshold)?;
+            print!("{}", catalogy_dedup::format_cross_video_report(&dups));
+        }
+    }
+
+    Ok(())
+}
+
 fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let catalog = Arc::new(catalogy_catalog::Catalog::open(
         &catalog_path().to_string_lossy(),
@@ -384,9 +434,15 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    let db_path = default_state_db_path();
     let state = Arc::new(catalogy_server::AppState {
         catalog,
         search_engine,
+        state_db_path: if db_path.exists() {
+            Some(db_path)
+        } else {
+            None
+        },
     });
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -445,6 +501,12 @@ fn main() {
             after,
         } => {
             if let Err(e) = run_search(&query, limit, media_type.as_deref(), after.as_deref()) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Dedup { tier, threshold } => {
+            if let Err(e) = run_dedup(&tier, threshold) {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
             }

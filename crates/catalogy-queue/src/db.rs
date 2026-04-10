@@ -475,6 +475,65 @@ impl StateDb {
         Ok(count)
     }
 
+    // ── Dedup queries ────────────────────────────────────────
+
+    /// Find file_hash values that appear more than once with status='active'.
+    /// Returns groups of (file_hash, vec of FileRecord).
+    pub fn find_duplicate_hashes(&self) -> Result<Vec<(String, Vec<FileRecord>)>> {
+        // Find hashes with more than one active row
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT file_hash FROM files WHERE status = 'active'
+                 GROUP BY file_hash HAVING COUNT(*) > 1",
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+
+        let hashes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| CatalogyError::Database(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut groups = Vec::new();
+        for hash in hashes {
+            let mut file_stmt = self
+                .conn
+                .prepare(
+                    "SELECT file_hash, file_path, file_size, file_modified, first_seen, last_seen, status
+                     FROM files WHERE file_hash = ?1 AND status = 'active'",
+                )
+                .map_err(|e| CatalogyError::Database(e.to_string()))?;
+
+            let records: Vec<FileRecord> = file_stmt
+                .query_map(params![hash], |row| {
+                    Ok(FileRecord {
+                        file_hash: row.get(0)?,
+                        file_path: row.get(1)?,
+                        file_size: row.get(2)?,
+                        file_modified: row.get(3)?,
+                        first_seen: row.get(4)?,
+                        last_seen: row.get(5)?,
+                        status: row.get(6)?,
+                    })
+                })
+                .map_err(|e| CatalogyError::Database(e.to_string()))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            if records.len() > 1 {
+                groups.push((hash, records));
+            }
+        }
+
+        Ok(groups)
+    }
+
+    /// Get a reference to the underlying SQLite connection for advanced queries.
+    pub fn raw_connection(&self) -> &Connection {
+        &self.conn
+    }
+
     // ── Config state ────────────────────────────────────────
 
     /// Set a config state value.

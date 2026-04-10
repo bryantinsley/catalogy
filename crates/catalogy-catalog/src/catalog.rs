@@ -167,6 +167,29 @@ impl Catalog {
         })
     }
 
+    /// List all records in the catalog.
+    pub fn list_all(&self) -> Result<Vec<CatalogRecord>> {
+        self.rt.block_on(async {
+            let table = match self.open_table().await {
+                Ok(t) => t,
+                Err(_) => return Ok(Vec::new()),
+            };
+
+            let results = table
+                .query()
+                .execute()
+                .await
+                .map_err(|e| CatalogyError::Database(format!("Query failed: {}", e)))?;
+
+            let batches = collect_batches(results).await?;
+            let mut all_records = Vec::new();
+            for batch in &batches {
+                all_records.extend(batch_to_records(batch)?);
+            }
+            Ok(all_records)
+        })
+    }
+
     /// Count total records.
     pub fn count(&self) -> Result<u64> {
         self.rt.block_on(async {

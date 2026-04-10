@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{Json, Response},
 };
@@ -144,6 +144,108 @@ pub async fn stats_handler(
 
     Ok(Json(StatsResponse {
         total_items: total,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct DedupQuery {
+    #[serde(default = "default_tier")]
+    pub tier: String,
+    #[serde(default = "default_threshold")]
+    pub threshold: f32,
+}
+
+fn default_tier() -> String {
+    "all".to_string()
+}
+
+fn default_threshold() -> f32 {
+    0.92
+}
+
+#[derive(Serialize)]
+pub struct DedupResponse {
+    pub tier: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact: Option<Vec<catalogy_dedup::DuplicateSet>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visual: Option<Vec<catalogy_dedup::VisualDuplicateCluster>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cross_video: Option<Vec<catalogy_dedup::CrossVideoDuplicate>>,
+}
+
+pub async fn dedup_handler(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<DedupQuery>,
+) -> Result<Json<DedupResponse>, (StatusCode, String)> {
+    let tier = params.tier.as_str();
+    let threshold = params.threshold;
+
+    let run_exact = tier == "all" || tier == "exact";
+    let run_visual = tier == "all" || tier == "visual";
+    let run_cross = tier == "all" || tier == "cross-video";
+
+    if !run_exact && !run_visual && !run_cross {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Unknown tier: {}. Use: exact, visual, cross-video, or all", tier),
+        ));
+    }
+
+    let exact = if run_exact {
+        if let Some(ref db_path) = state.state_db_path {
+            let db = catalogy_queue::StateDb::open(db_path).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Database error: {}", e),
+                )
+            })?;
+            Some(catalogy_dedup::find_exact_duplicates(&db).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Exact dedup error: {}", e),
+                )
+            })?)
+        } else {
+            Some(Vec::new())
+        }
+    } else {
+        None
+    };
+
+    let visual = if run_visual {
+        Some(
+            catalogy_dedup::find_visual_duplicates(&state.catalog, threshold).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Visual dedup error: {}", e),
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+
+    let cross_video = if run_cross {
+        Some(
+            catalogy_dedup::find_cross_video_duplicates(&state.catalog, threshold).map_err(
+                |e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Cross-video dedup error: {}", e),
+                    )
+                },
+            )?,
+        )
+    } else {
+        None
+    };
+
+    Ok(Json(DedupResponse {
+        tier: params.tier,
+        exact,
+        visual,
+        cross_video,
     }))
 }
 
