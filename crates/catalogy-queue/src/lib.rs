@@ -1,13 +1,5 @@
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+mod change;
+mod db;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!version().is_empty());
-    }
-}
+pub use change::{apply_changes_and_enqueue, detect_changes, FileChange, FileChangeKind};
+pub use db::StateDb;

@@ -29,3 +29,8 @@ catalogy-catalog = { path = "crates/catalogy-catalog" }
 catalogy-search = { path = "crates/catalogy-search" }
 catalogy-server = { path = "crates/catalogy-server" }
 clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"

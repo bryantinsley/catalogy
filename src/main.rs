@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(
@@ -90,21 +91,125 @@ enum Commands {
     Config,
 }
 
+fn default_state_db_path() -> PathBuf {
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("catalogy");
+    std::fs::create_dir_all(&data_dir).ok();
+    data_dir.join("state.db")
+}
+
+fn run_scan(scan_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = default_state_db_path();
+    let db = catalogy_queue::StateDb::open(&db_path)?;
+
+    // Default extensions
+    let image_exts: Vec<String> = vec![
+        "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif", "avif",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    let video_exts: Vec<String> = vec![
+        "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "mpg", "mpeg",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+
+    let root = Path::new(scan_path);
+    println!("Scanning {scan_path}...");
+
+    let scanned = catalogy_scanner::scan_directory(root, &image_exts, &video_exts)?;
+    println!("Found {} media files", scanned.len());
+
+    let changes = catalogy_queue::detect_changes(&db, &scanned)?;
+    let result = catalogy_queue::apply_changes_and_enqueue(&db, &changes)?;
+
+    println!("Scan complete:");
+    println!("  New:       {}", result.new_files);
+    println!("  Modified:  {}", result.modified_files);
+    println!("  Moved:     {}", result.moved_files);
+    println!("  Deleted:   {}", result.deleted_files);
+    println!("  Unchanged: {}", result.unchanged_files);
+
+    db.set_config("last_scan_time", &chrono::Utc::now().to_rfc3339())?;
+
+    Ok(())
+}
+
+fn run_status() -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = default_state_db_path();
+    if !db_path.exists() {
+        println!("No state database found. Run `catalogy scan` first.");
+        return Ok(());
+    }
+
+    let db = catalogy_queue::StateDb::open(&db_path)?;
+
+    let file_count = db.file_count()?;
+    println!("Tracked files: {file_count}");
+
+    let stats = db.stats()?;
+    println!("\nJob Queue:");
+    println!("  Pending:   {}", stats.pending);
+    println!("  Running:   {}", stats.running);
+    println!("  Completed: {}", stats.completed);
+    println!("  Failed:    {}", stats.failed);
+    println!("  Skipped:   {}", stats.skipped);
+
+    if !stats.by_stage.is_empty() {
+        println!("\nBy Stage:");
+        println!(
+            "  {:<20} {:>8} {:>8} {:>10} {:>8} {:>8}",
+            "Stage", "Pending", "Running", "Completed", "Failed", "Skipped"
+        );
+        for (stage, p, r, c, f, s) in &stats.by_stage {
+            println!("  {stage:<20} {p:>8} {r:>8} {c:>10} {f:>8} {s:>8}");
+        }
+    }
+
+    if let Some(last_scan) = db.get_config("last_scan_time")? {
+        println!("\nLast scan: {last_scan}");
+    }
+
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Scan { .. } => {
-            println!("scan: not yet implemented");
+        Commands::Scan { path, watch } => {
+            if watch {
+                println!("Watch mode is not yet implemented.");
+                return;
+            }
+
+            let scan_path = match path {
+                Some(p) => p,
+                None => {
+                    eprintln!("Error: --path is required");
+                    std::process::exit(1);
+                }
+            };
+
+            if let Err(e) = run_scan(&scan_path) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Status => {
+            if let Err(e) = run_status() {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
         Commands::Ingest { .. } => {
             println!("ingest: not yet implemented");
         }
         Commands::Search { .. } => {
             println!("search: not yet implemented");
-        }
-        Commands::Status => {
-            println!("status: not yet implemented");
         }
         Commands::Reembed { .. } => {
             println!("reembed: not yet implemented");

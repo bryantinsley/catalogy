@@ -5,3 +5,8 @@ edition = "2021"
 
 [dependencies]
 catalogy-core = { path = "../catalogy-core" }
+walkdir = "2"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
