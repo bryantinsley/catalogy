@@ -8,6 +8,8 @@ catalogy-core = { path = "../catalogy-core" }
 catalogy-search = { path = "../catalogy-search" }
 catalogy-catalog = { path = "../catalogy-catalog" }
 catalogy-embed = { path = "../catalogy-embed" }
+catalogy-dedup = { path = "../catalogy-dedup" }
+catalogy-queue = { path = "../catalogy-queue" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
