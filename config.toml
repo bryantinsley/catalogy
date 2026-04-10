@@ -1,0 +1,32 @@
+[library]
+paths = ["/Volumes/Media/Photos", "/Volumes/Media/Videos"]
+extensions_image = ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff"]
+extensions_video = ["mp4", "mov", "avi", "mkv", "webm"]
+
+[database]
+catalog_path = "~/.local/share/catalogy/catalog.lance"
+state_path = "~/.local/share/catalogy/state.db"
+
+[embedding]
+model_path = "~/.local/share/catalogy/models/clip-vit-h-14.onnx"
+model_id = "clip-vit-h-14"
+model_version = "1"
+dimensions = 1024
+batch_size = 16
+execution_provider = "coreml"
+
+[extraction]
+frame_strategy = "adaptive"
+scene_threshold = 0.3
+max_interval_seconds = 60
+frame_interval_seconds = 30
+frame_max_dimension = 512
+dedup_similarity_threshold = 0.95
+
+[ingest]
+workers = 4
+hash_algorithm = "sha256"
+
+[server]
+port = 8080
+host = "127.0.0.1"

@@ -1,0 +1,31 @@
+[workspace]
+members = [
+    "crates/catalogy-core",
+    "crates/catalogy-scanner",
+    "crates/catalogy-queue",
+    "crates/catalogy-extract",
+    "crates/catalogy-metadata",
+    "crates/catalogy-embed",
+    "crates/catalogy-catalog",
+    "crates/catalogy-search",
+    "crates/catalogy-server",
+]
+resolver = "2"
+
+[package]
+name = "catalogy"
+version = "0.1.0"
+edition = "2021"
+description = "Local-first semantic media search engine"
+
+[dependencies]
+catalogy-core = { path = "crates/catalogy-core" }
+catalogy-scanner = { path = "crates/catalogy-scanner" }
+catalogy-queue = { path = "crates/catalogy-queue" }
+catalogy-extract = { path = "crates/catalogy-extract" }
+catalogy-metadata = { path = "crates/catalogy-metadata" }
+catalogy-embed = { path = "crates/catalogy-embed" }
+catalogy-catalog = { path = "crates/catalogy-catalog" }
+catalogy-search = { path = "crates/catalogy-search" }
+catalogy-server = { path = "crates/catalogy-server" }
+clap = { version = "4", features = ["derive"] }
