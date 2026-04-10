@@ -31,7 +31,7 @@ enum Commands {
         #[arg(long)]
         workers: Option<u32>,
 
-        /// Only process specific stages
+        /// Only process specific stages (comma-separated: metadata,frames)
         #[arg(long)]
         stages: Option<String>,
     },
@@ -97,6 +97,19 @@ fn default_state_db_path() -> PathBuf {
         .join("catalogy");
     std::fs::create_dir_all(&data_dir).ok();
     data_dir.join("state.db")
+}
+
+fn default_extraction_config() -> catalogy_core::ExtractionConfig {
+    catalogy_core::ExtractionConfig {
+        frame_strategy: "adaptive".to_string(),
+        scene_threshold: 0.3,
+        max_interval_seconds: 60,
+        frame_interval_seconds: 30,
+        frame_max_dimension: 512,
+        dedup_similarity_threshold: 0.95,
+        ffprobe_path: None,
+        thumbnail_dir: "~/.local/share/catalogy/thumbs".to_string(),
+    }
 }
 
 fn run_scan(scan_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -176,7 +189,14 @@ fn run_status() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_ingest_metadata() -> Result<(), Box<dyn std::error::Error>> {
+fn should_run_stage(stages: Option<&str>, stage_name: &str) -> bool {
+    match stages {
+        None => true, // No filter = run all stages
+        Some(s) => s.split(',').any(|s| s.trim() == stage_name),
+    }
+}
+
+fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = default_state_db_path();
     if !db_path.exists() {
         println!("No state database found. Run `catalogy scan` first.");
@@ -184,18 +204,28 @@ fn run_ingest_metadata() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let db = catalogy_queue::StateDb::open(&db_path)?;
+    let config = default_extraction_config();
 
-    // Detect ffprobe
-    let ffprobe = catalogy_metadata::find_ffprobe(None);
-    if let Some(ref fp) = ffprobe {
-        println!("Using ffprobe: {}", fp.display());
-    } else {
-        println!("Warning: ffprobe not found. Video metadata extraction will be skipped.");
+    // Stage: extract_frames
+    if should_run_stage(stages, "frames") || should_run_stage(stages, "extract_frames") {
+        println!("Processing extract_frames jobs...");
+        let count = catalogy_extract::run_extract_frames_worker(&db, &config, "worker-main")?;
+        println!("Processed {count} extract_frames jobs.");
     }
 
-    let processed = catalogy_metadata::run_metadata_worker(&db, ffprobe.as_deref(), true)?;
+    // Stage: extract_metadata
+    if should_run_stage(stages, "metadata") || should_run_stage(stages, "extract_metadata") {
+        println!("Processing extract_metadata jobs...");
+        let ffprobe = catalogy_metadata::find_ffprobe(config.ffprobe_path.as_deref());
+        if let Some(ref fp) = ffprobe {
+            println!("Using ffprobe: {}", fp.display());
+        } else {
+            println!("Warning: ffprobe not found. Video metadata extraction will be skipped.");
+        }
+        let processed = catalogy_metadata::run_metadata_worker(&db, ffprobe.as_deref(), true)?;
+        println!("Processed {processed} metadata jobs.");
+    }
 
-    println!("Processed {processed} metadata jobs.");
     Ok(())
 }
 
@@ -229,18 +259,9 @@ fn main() {
             }
         }
         Commands::Ingest { stages, .. } => {
-            let run_metadata = stages
-                .as_ref()
-                .map(|s| s.contains("metadata"))
-                .unwrap_or(true);
-
-            if run_metadata {
-                if let Err(e) = run_ingest_metadata() {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            } else {
-                println!("No matching stages to process.");
+            if let Err(e) = run_ingest(stages.as_deref()) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
             }
         }
         Commands::Search { .. } => {

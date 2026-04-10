@@ -35,4 +35,4 @@ indicatif = "0.17"
 
 [dev-dependencies]
 tempfile = "3"
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

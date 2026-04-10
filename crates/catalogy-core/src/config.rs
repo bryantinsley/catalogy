@@ -43,6 +43,12 @@ pub struct ExtractionConfig {
     pub dedup_similarity_threshold: f32,
     #[serde(default)]
     pub ffprobe_path: Option<String>,
+    #[serde(default = "default_thumbnail_dir")]
+    pub thumbnail_dir: String,
+}
+
+fn default_thumbnail_dir() -> String {
+    "~/.local/share/catalogy/thumbs".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize)]
