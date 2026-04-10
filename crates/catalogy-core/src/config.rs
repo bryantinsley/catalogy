@@ -8,6 +8,8 @@ pub struct Config {
     pub extraction: ExtractionConfig,
     pub ingest: IngestConfig,
     pub server: ServerConfig,
+    #[serde(default)]
+    pub transcode: TranscodeConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -49,6 +51,39 @@ pub struct ExtractionConfig {
 
 fn default_thumbnail_dir() -> String {
     "~/.local/share/catalogy/thumbs".to_string()
+}
+
+fn default_staging_dir() -> String {
+    "~/.local/share/catalogy/transcode_staging".to_string()
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TranscodeConfig {
+    pub enabled: bool,
+    pub max_resolution: String,
+    pub target_codec: String,
+    pub target_crf: u32,
+    pub use_hw_encoder: bool,
+    pub original_policy: String,
+    #[serde(default = "default_staging_dir")]
+    pub staging_dir: String,
+    #[serde(default)]
+    pub archive_dir: Option<String>,
+}
+
+impl Default for TranscodeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_resolution: "1080p".to_string(),
+            target_codec: "h265".to_string(),
+            target_crf: 23,
+            use_hw_encoder: true,
+            original_policy: "keep".to_string(),
+            staging_dir: default_staging_dir(),
+            archive_dir: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -122,6 +157,34 @@ host = "127.0.0.1"
         assert_eq!(config.server.port, 8080);
         assert_eq!(config.extraction.frame_strategy, "adaptive");
         assert_eq!(config.ingest.workers, 4);
+        // Transcode should use defaults when section is omitted
+        assert!(!config.transcode.enabled);
+        assert_eq!(config.transcode.max_resolution, "1080p");
+        assert_eq!(config.transcode.target_codec, "h265");
+    }
+
+    #[test]
+    fn test_parse_config_with_transcode() {
+        let config_str = format!(
+            r#"{}
+[transcode]
+enabled = true
+max_resolution = "4k"
+target_codec = "h265"
+target_crf = 18
+use_hw_encoder = false
+original_policy = "archive"
+archive_dir = "/nas/archive"
+"#,
+            TEST_CONFIG
+        );
+        let config = Config::parse(&config_str).unwrap();
+        assert!(config.transcode.enabled);
+        assert_eq!(config.transcode.max_resolution, "4k");
+        assert_eq!(config.transcode.target_crf, 18);
+        assert!(!config.transcode.use_hw_encoder);
+        assert_eq!(config.transcode.original_policy, "archive");
+        assert_eq!(config.transcode.archive_dir, Some("/nas/archive".to_string()));
     }
 
     #[test]

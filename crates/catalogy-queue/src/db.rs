@@ -753,6 +753,94 @@ impl StateDb {
 
     // ── Metadata table ─────────────────────────────────────
 
+    /// Get extracted metadata for a file.
+    pub fn get_metadata(&self, file_hash: &str) -> Result<Option<catalogy_core::MediaMetadata>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT width, height, duration_ms, fps, codec, bitrate_kbps,
+                        exif_camera_make, exif_camera_model, exif_date_taken,
+                        exif_gps_lat, exif_gps_lon, exif_focal_length_mm,
+                        exif_iso, exif_orientation
+                 FROM metadata WHERE file_hash = ?1",
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+
+        let result = stmt
+            .query_row(params![file_hash], |row| {
+                let exif_make: Option<String> = row.get(6)?;
+                let exif_model: Option<String> = row.get(7)?;
+                let exif_date: Option<String> = row.get(8)?;
+                let exif_lat: Option<f64> = row.get(9)?;
+                let exif_lon: Option<f64> = row.get(10)?;
+                let exif_fl: Option<f32> = row.get(11)?;
+                let exif_iso: Option<u32> = row.get(12)?;
+                let exif_orient: Option<u32> = row.get(13)?;
+
+                let has_exif = exif_make.is_some()
+                    || exif_model.is_some()
+                    || exif_date.is_some()
+                    || exif_lat.is_some();
+
+                let exif = if has_exif {
+                    Some(catalogy_core::ExifData {
+                        camera_make: exif_make,
+                        camera_model: exif_model,
+                        date_taken: exif_date
+                            .and_then(|d| chrono::NaiveDateTime::parse_from_str(&d, "%Y-%m-%d %H:%M:%S").ok()),
+                        gps_lat: exif_lat,
+                        gps_lon: exif_lon,
+                        focal_length_mm: exif_fl,
+                        iso: exif_iso,
+                        orientation: exif_orient.map(|o| o as u8),
+                    })
+                } else {
+                    None
+                };
+
+                Ok(catalogy_core::MediaMetadata {
+                    width: row.get(0)?,
+                    height: row.get(1)?,
+                    duration_ms: row.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+                    fps: row.get(3)?,
+                    codec: row.get(4)?,
+                    bitrate_kbps: row.get(5)?,
+                    exif,
+                })
+            })
+            .optional()
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+
+        Ok(result)
+    }
+
+    /// Get all active video files with their metadata (for transcode evaluation).
+    pub fn get_video_files_with_metadata(
+        &self,
+        video_extensions: &[&str],
+    ) -> Result<Vec<(FileRecord, catalogy_core::MediaMetadata)>> {
+        let all_files = self.get_all_active_files()?;
+        let mut results = Vec::new();
+
+        for file in all_files {
+            let ext = std::path::Path::new(&file.file_path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+
+            if !video_extensions.contains(&ext.as_str()) {
+                continue;
+            }
+
+            if let Some(meta) = self.get_metadata(&file.file_hash)? {
+                results.push((file, meta));
+            }
+        }
+
+        Ok(results)
+    }
+
     /// Store extracted metadata for a file.
     pub fn store_metadata(
         &self,
@@ -828,6 +916,7 @@ fn stage_to_str(stage: &JobStage) -> &'static str {
         JobStage::Embed => "embed",
         JobStage::Index => "index",
         JobStage::ReEmbed => "re_embed",
+        JobStage::Transcode => "transcode",
     }
 }
 

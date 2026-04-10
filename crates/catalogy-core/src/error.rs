@@ -14,6 +14,9 @@ pub enum CatalogyError {
     #[error("Extraction error: {0}")]
     Extraction(String),
 
+    #[error("Transcode error: {0}")]
+    Transcode(String),
+
     #[error("Config error: {0}")]
     Config(String),
 
