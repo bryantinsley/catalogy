@@ -392,6 +392,18 @@ impl StateDb {
         Ok(())
     }
 
+    /// Reset all running jobs back to pending (for crash recovery / graceful shutdown).
+    pub fn reset_running_to_pending(&self) -> Result<u64> {
+        let count = self
+            .conn
+            .execute(
+                "UPDATE jobs SET status = 'pending', worker_id = NULL, started_at = NULL WHERE status = 'running'",
+                [],
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(count as u64)
+    }
+
     /// Get queue statistics.
     pub fn stats(&self) -> Result<QueueStats> {
         let mut stats = QueueStats::default();
