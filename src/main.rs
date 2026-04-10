@@ -76,6 +76,14 @@ enum Commands {
         #[arg(long)]
         model_path: Option<String>,
 
+        /// Model version string
+        #[arg(long, default_value = "1")]
+        model_version: String,
+
+        /// Embedding dimensions
+        #[arg(long, default_value = "1024")]
+        dimensions: u32,
+
         /// Rebuild ANN index after re-embedding
         #[arg(long)]
         rebuild_index: bool,
@@ -201,6 +209,19 @@ fn run_status() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(last_scan) = db.get_config("last_scan_time")? {
         println!("\nLast scan: {last_scan}");
+    }
+
+    // Show registered models
+    let models = db.list_models()?;
+    if !models.is_empty() {
+        println!("\nModels:");
+        for m in &models {
+            let current = if m.is_current { " (current)" } else { "" };
+            println!(
+                "  {} v{} - {}d{current}",
+                m.model_id, m.model_version, m.dimensions
+            );
+        }
     }
 
     Ok(())
@@ -403,6 +424,93 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_reembed(
+    register: bool,
+    activate: bool,
+    model_id: Option<&str>,
+    model_path: Option<&str>,
+    model_version: &str,
+    dimensions: u32,
+    rebuild_index: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = default_state_db_path();
+    let db = catalogy_queue::StateDb::open(&db_path)?;
+
+    if register {
+        let mid = model_id.ok_or("--model-id is required for --register")?;
+        let mpath = model_path.ok_or("--model-path is required for --register")?;
+
+        // Verify the model file exists
+        if !Path::new(mpath).exists() {
+            return Err(format!("Model file not found: {}", mpath).into());
+        }
+
+        db.register_model(mid, model_version, mpath, dimensions)?;
+        println!("Registered model '{mid}' (version={model_version}, dimensions={dimensions})");
+        println!("  Path: {mpath}");
+        println!("Use --activate --model-id {mid} to set as current and create re-embed jobs.");
+        return Ok(());
+    }
+
+    if activate {
+        let mid = model_id.ok_or("--model-id is required for --activate")?;
+
+        let model = db.get_model(mid)?.ok_or(format!("Model '{}' not found. Register it first with --register.", mid))?;
+
+        db.set_current_model(mid)?;
+        println!("Set '{mid}' as current model.");
+
+        let job_count = db.enqueue_reembed(mid, &model.model_version)?;
+        println!("Created {job_count} re-embed jobs.");
+
+        if job_count > 0 {
+            println!("Run `catalogy ingest --stages embed` or the re-embed worker to process them.");
+        }
+        return Ok(());
+    }
+
+    if rebuild_index {
+        let catalog_path_str = catalog_path().to_string_lossy().to_string();
+        let catalog = catalogy_catalog::Catalog::open(&catalog_path_str)?;
+
+        let count = catalog.count()?;
+        if count == 0 {
+            println!("Catalog is empty. Nothing to index.");
+            return Ok(());
+        }
+
+        let num_partitions = std::cmp::max(1, (count as f64).sqrt() as u32);
+        println!("Rebuilding ANN index ({count} rows, {num_partitions} partitions)...");
+        catalog.build_index(num_partitions)?;
+        println!("Index rebuilt successfully.");
+        return Ok(());
+    }
+
+    // No flags: show usage
+    println!("Usage:");
+    println!("  catalogy reembed --register --model-id <ID> --model-path <PATH> [--dimensions <N>] [--model-version <V>]");
+    println!("  catalogy reembed --activate --model-id <ID>");
+    println!("  catalogy reembed --rebuild-index");
+    println!();
+
+    // List registered models
+    let models = db.list_models()?;
+    if models.is_empty() {
+        println!("No models registered.");
+    } else {
+        println!("Registered models:");
+        for m in &models {
+            let current = if m.is_current { " (current)" } else { "" };
+            println!(
+                "  {} v{} - {}d - {}{current}",
+                m.model_id, m.model_version, m.dimensions, m.model_path
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -449,8 +557,27 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Reembed { .. } => {
-            println!("reembed: not yet implemented");
+        Commands::Reembed {
+            register,
+            activate,
+            model_id,
+            model_path,
+            model_version,
+            dimensions,
+            rebuild_index,
+        } => {
+            if let Err(e) = run_reembed(
+                register,
+                activate,
+                model_id.as_deref(),
+                model_path.as_deref(),
+                &model_version,
+                dimensions,
+                rebuild_index,
+            ) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
         Commands::Serve { port } => {
             if let Err(e) = run_serve(port) {

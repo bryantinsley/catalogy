@@ -14,6 +14,17 @@ pub struct QueueStats {
     pub by_stage: Vec<(String, u64, u64, u64, u64, u64)>,
 }
 
+/// Row from the models table.
+#[derive(Clone, Debug)]
+pub struct ModelRecord {
+    pub model_id: String,
+    pub model_version: String,
+    pub model_path: String,
+    pub dimensions: u32,
+    pub is_current: bool,
+    pub registered_at: String,
+}
+
 /// Row from the files table.
 #[derive(Clone, Debug)]
 pub struct FileRecord {
@@ -505,6 +516,182 @@ impl StateDb {
         Ok(result)
     }
 
+    // ── Models table ───────────────────────────────────────
+
+    /// Register a new embedding model.
+    pub fn register_model(
+        &self,
+        model_id: &str,
+        model_version: &str,
+        model_path: &str,
+        dimensions: u32,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO models (model_id, model_version, model_path, dimensions, is_current, registered_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5)
+                 ON CONFLICT(model_id) DO UPDATE SET
+                    model_version = excluded.model_version,
+                    model_path = excluded.model_path,
+                    dimensions = excluded.dimensions,
+                    registered_at = excluded.registered_at",
+                params![model_id, model_version, model_path, dimensions as i64, now],
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Get a model by ID.
+    pub fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        let result = self
+            .conn
+            .query_row(
+                "SELECT model_id, model_version, model_path, dimensions, is_current, registered_at
+                 FROM models WHERE model_id = ?1",
+                params![model_id],
+                |row| {
+                    Ok(ModelRecord {
+                        model_id: row.get(0)?,
+                        model_version: row.get(1)?,
+                        model_path: row.get(2)?,
+                        dimensions: row.get::<_, i64>(3)? as u32,
+                        is_current: row.get::<_, i64>(4)? != 0,
+                        registered_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(result)
+    }
+
+    /// List all registered models.
+    pub fn list_models(&self) -> Result<Vec<ModelRecord>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT model_id, model_version, model_path, dimensions, is_current, registered_at
+                 FROM models ORDER BY registered_at",
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ModelRecord {
+                    model_id: row.get(0)?,
+                    model_version: row.get(1)?,
+                    model_path: row.get(2)?,
+                    dimensions: row.get::<_, i64>(3)? as u32,
+                    is_current: row.get::<_, i64>(4)? != 0,
+                    registered_at: row.get(5)?,
+                })
+            })
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+
+        let mut models = Vec::new();
+        for row in rows {
+            models.push(row.map_err(|e| CatalogyError::Database(e.to_string()))?);
+        }
+        Ok(models)
+    }
+
+    /// Get the currently active model.
+    pub fn get_current_model(&self) -> Result<Option<ModelRecord>> {
+        let result = self
+            .conn
+            .query_row(
+                "SELECT model_id, model_version, model_path, dimensions, is_current, registered_at
+                 FROM models WHERE is_current = 1",
+                [],
+                |row| {
+                    Ok(ModelRecord {
+                        model_id: row.get(0)?,
+                        model_version: row.get(1)?,
+                        model_path: row.get(2)?,
+                        dimensions: row.get::<_, i64>(3)? as u32,
+                        is_current: row.get::<_, i64>(4)? != 0,
+                        registered_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(result)
+    }
+
+    /// Set a model as the current active model (clears is_current on all others).
+    pub fn set_current_model(&self, model_id: &str) -> Result<()> {
+        // Verify model exists
+        if self.get_model(model_id)?.is_none() {
+            return Err(CatalogyError::Database(format!(
+                "Model '{}' not found",
+                model_id
+            )));
+        }
+
+        self.conn
+            .execute("UPDATE models SET is_current = 0", [])
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        self.conn
+            .execute(
+                "UPDATE models SET is_current = 1 WHERE model_id = ?1",
+                params![model_id],
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Enqueue re-embed jobs for all files that need re-embedding with a new model.
+    /// Returns the number of jobs created.
+    pub fn enqueue_reembed(
+        &self,
+        target_model_id: &str,
+        target_model_version: &str,
+    ) -> Result<u64> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let stage_str = stage_to_str(&JobStage::ReEmbed);
+
+        // Get all active files and create re_embed jobs for each
+        let files = self.get_all_active_files()?;
+        let mut count = 0u64;
+
+        for file in &files {
+            // Check for existing non-failed re_embed job for this file
+            let existing: Option<i64> = self
+                .conn
+                .query_row(
+                    "SELECT id FROM jobs WHERE file_hash = ?1 AND stage = ?2 AND status != 'failed'",
+                    params![file.file_hash, stage_str],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| CatalogyError::Database(e.to_string()))?;
+
+            if existing.is_some() {
+                continue;
+            }
+
+            self.conn
+                .execute(
+                    "INSERT INTO jobs (file_hash, file_path, stage, status, created_at, model_id, model_version)
+                     VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6)",
+                    params![
+                        file.file_hash,
+                        file.file_path,
+                        stage_str,
+                        now,
+                        target_model_id,
+                        target_model_version,
+                    ],
+                )
+                .map_err(|e| CatalogyError::Database(e.to_string()))?;
+            count += 1;
+        }
+
+        Ok(count)
+    }
+
     // ── Metadata table ─────────────────────────────────────
 
     /// Store extracted metadata for a file.
@@ -897,5 +1084,150 @@ mod tests {
         let db = StateDb::open(&path).unwrap();
         let file = db.get_file_by_hash("abc").unwrap().unwrap();
         assert_eq!(file.file_path, "/test.jpg");
+    }
+
+    // ── Model registry tests ──────────────────────────────
+
+    #[test]
+    fn test_register_model() {
+        let db = test_db();
+        db.register_model("clip-vit-h-14", "1", "/models/visual.onnx", 1024)
+            .unwrap();
+
+        let model = db.get_model("clip-vit-h-14").unwrap().unwrap();
+        assert_eq!(model.model_id, "clip-vit-h-14");
+        assert_eq!(model.model_version, "1");
+        assert_eq!(model.model_path, "/models/visual.onnx");
+        assert_eq!(model.dimensions, 1024);
+        assert!(!model.is_current);
+    }
+
+    #[test]
+    fn test_register_model_upsert() {
+        let db = test_db();
+        db.register_model("clip-vit-h-14", "1", "/models/old.onnx", 1024)
+            .unwrap();
+        db.register_model("clip-vit-h-14", "2", "/models/new.onnx", 768)
+            .unwrap();
+
+        let model = db.get_model("clip-vit-h-14").unwrap().unwrap();
+        assert_eq!(model.model_version, "2");
+        assert_eq!(model.model_path, "/models/new.onnx");
+        assert_eq!(model.dimensions, 768);
+    }
+
+    #[test]
+    fn test_list_models() {
+        let db = test_db();
+        db.register_model("model-a", "1", "/a.onnx", 512)
+            .unwrap();
+        db.register_model("model-b", "1", "/b.onnx", 1024)
+            .unwrap();
+
+        let models = db.list_models().unwrap();
+        assert_eq!(models.len(), 2);
+    }
+
+    #[test]
+    fn test_list_models_empty() {
+        let db = test_db();
+        let models = db.list_models().unwrap();
+        assert!(models.is_empty());
+    }
+
+    #[test]
+    fn test_get_model_not_found() {
+        let db = test_db();
+        assert!(db.get_model("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_set_current_model() {
+        let db = test_db();
+        db.register_model("model-a", "1", "/a.onnx", 512)
+            .unwrap();
+        db.register_model("model-b", "1", "/b.onnx", 1024)
+            .unwrap();
+
+        db.set_current_model("model-a").unwrap();
+        let current = db.get_current_model().unwrap().unwrap();
+        assert_eq!(current.model_id, "model-a");
+
+        // Switch to model-b
+        db.set_current_model("model-b").unwrap();
+        let current = db.get_current_model().unwrap().unwrap();
+        assert_eq!(current.model_id, "model-b");
+
+        // model-a should no longer be current
+        let a = db.get_model("model-a").unwrap().unwrap();
+        assert!(!a.is_current);
+    }
+
+    #[test]
+    fn test_set_current_model_not_found() {
+        let db = test_db();
+        let result = db.set_current_model("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_current_model_none() {
+        let db = test_db();
+        assert!(db.get_current_model().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_enqueue_reembed() {
+        let db = test_db();
+        db.upsert_file("a", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
+            .unwrap();
+        db.upsert_file("b", "/b.jpg", 200, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
+            .unwrap();
+        db.upsert_file("c", "/c.jpg", 300, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
+            .unwrap();
+
+        let count = db.enqueue_reembed("new-model", "2").unwrap();
+        assert_eq!(count, 3);
+
+        // Verify jobs exist with correct stage
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.pending, 3);
+        let re_embed_stage = stats.by_stage.iter().find(|s| s.0 == "re_embed");
+        assert!(re_embed_stage.is_some());
+        assert_eq!(re_embed_stage.unwrap().1, 3); // 3 pending
+    }
+
+    #[test]
+    fn test_enqueue_reembed_idempotent() {
+        let db = test_db();
+        db.upsert_file("a", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
+            .unwrap();
+
+        let count1 = db.enqueue_reembed("new-model", "2").unwrap();
+        assert_eq!(count1, 1);
+
+        // Second call should not create duplicates
+        let count2 = db.enqueue_reembed("new-model", "2").unwrap();
+        assert_eq!(count2, 0);
+    }
+
+    #[test]
+    fn test_enqueue_reembed_no_files() {
+        let db = test_db();
+        let count = db.enqueue_reembed("new-model", "2").unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_enqueue_reembed_skips_deleted() {
+        let db = test_db();
+        db.upsert_file("a", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
+            .unwrap();
+        db.upsert_file("b", "/b.jpg", 200, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
+            .unwrap();
+        db.mark_file_deleted("b", "2024-07-01T00:00:00Z").unwrap();
+
+        let count = db.enqueue_reembed("new-model", "2").unwrap();
+        assert_eq!(count, 1); // Only active file 'a'
     }
 }

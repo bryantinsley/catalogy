@@ -117,6 +117,64 @@ pub fn aggregate_video_frames(
     (kept_indices, video_embedding)
 }
 
+/// Run the re-embed worker loop: claim re_embed jobs, re-embed with new model, update catalog.
+/// Returns the number of jobs processed.
+pub fn run_reembed_worker(
+    db: &StateDb,
+    session: &EmbedSession,
+    catalog: &Catalog,
+    model_id: &str,
+    model_version: &str,
+    worker_id: &str,
+) -> Result<u64> {
+    let mut count = 0u64;
+
+    loop {
+        let job = match db.claim(JobStage::ReEmbed, worker_id)? {
+            Some(j) => j,
+            None => break,
+        };
+
+        let file_path = &job.file_path;
+
+        // Check if file exists
+        if !file_path.exists() {
+            db.skip(job.id)?;
+            continue;
+        }
+
+        match session.embed_image(file_path) {
+            Ok(embedding) => {
+                // Find existing catalog records for this file hash
+                let existing = catalog.get_by_hash(&job.file_hash.0)?;
+
+                if existing.is_empty() {
+                    // No existing record — skip (file may not have been indexed yet)
+                    db.skip(job.id)?;
+                    continue;
+                }
+
+                // Update each matching record with the new embedding
+                for mut record in existing {
+                    record.embedding = embedding.clone();
+                    record.model_id = model_id.to_string();
+                    record.model_version = model_version.to_string();
+                    record.updated_at = chrono::Utc::now().to_rfc3339();
+                    catalog.upsert(&record)?;
+                }
+
+                db.complete(job.id)?;
+                count += 1;
+            }
+            Err(e) => {
+                db.fail(job.id, &e.to_string())?;
+            }
+        }
+    }
+
+    Ok(count)
+}
+
 fn determine_media_type(ext: &str) -> String {
     match ext {
         "jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "tif" | "webp" | "heic" | "heif"
