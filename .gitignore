@@ -3,3 +3,4 @@ lancedb_data/
 __pycache__/
 *.pyc
 .DS_Store
+/target/
