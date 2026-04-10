@@ -41,6 +41,12 @@ pub struct ExtractionConfig {
     pub frame_interval_seconds: u32,
     pub frame_max_dimension: u32,
     pub dedup_similarity_threshold: f32,
+    #[serde(default = "default_thumbnail_dir")]
+    pub thumbnail_dir: String,
+}
+
+fn default_thumbnail_dir() -> String {
+    "~/.local/share/catalogy/thumbs".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize)]

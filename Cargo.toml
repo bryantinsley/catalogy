@@ -34,3 +34,4 @@ dirs = "5"
 
 [dev-dependencies]
 tempfile = "3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

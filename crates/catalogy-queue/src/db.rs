@@ -337,6 +337,18 @@ impl StateDb {
         Ok(())
     }
 
+    /// Mark a job as skipped.
+    pub fn skip(&self, job_id: i64) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "UPDATE jobs SET status = 'skipped', completed_at = ?2 WHERE id = ?1",
+                params![job_id, now],
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(())
+    }
+
     /// Mark a job as failed.
     pub fn fail(&self, job_id: i64, error: &str) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();

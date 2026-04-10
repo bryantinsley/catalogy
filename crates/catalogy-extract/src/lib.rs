@@ -1,13 +1,10 @@
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+mod extract;
+mod thumbnail;
+mod worker;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!version().is_empty());
-    }
-}
+pub use extract::{
+    build_ffmpeg_args, extract_frames, parse_frame_files, process_frames_in_batches,
+    ExtractionStrategy, FrameOutput,
+};
+pub use thumbnail::generate_thumbnail;
+pub use worker::{run_extract_frames_worker, ExtractFramesResult};

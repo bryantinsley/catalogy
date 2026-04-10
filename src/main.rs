@@ -176,6 +176,54 @@ fn run_status() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn default_extraction_config() -> catalogy_core::ExtractionConfig {
+    catalogy_core::ExtractionConfig {
+        frame_strategy: "adaptive".to_string(),
+        scene_threshold: 0.3,
+        max_interval_seconds: 60,
+        frame_interval_seconds: 30,
+        frame_max_dimension: 512,
+        dedup_similarity_threshold: 0.95,
+        thumbnail_dir: "~/.local/share/catalogy/thumbs".to_string(),
+    }
+}
+
+fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = default_state_db_path();
+    if !db_path.exists() {
+        println!("No state database found. Run `catalogy scan` first.");
+        return Ok(());
+    }
+
+    let db = catalogy_queue::StateDb::open(&db_path)?;
+    let config = default_extraction_config();
+
+    let run_frames = match stages {
+        Some(s) => s
+            .split(',')
+            .any(|s| s.trim() == "frames" || s.trim() == "extract_frames"),
+        None => true, // Run all available stages
+    };
+
+    if run_frames {
+        println!("Processing extract_frames jobs...");
+        let count = catalogy_extract::run_extract_frames_worker(&db, &config, "worker-main")?;
+        println!("Processed {count} extract_frames jobs.");
+    }
+
+    // Other stages (metadata, embed, index) will be added in future phases
+    if stages.is_some_and(|s| {
+        s.split(',').any(|s| {
+            let s = s.trim();
+            s != "frames" && s != "extract_frames"
+        })
+    }) {
+        println!("Note: only extract_frames stage is implemented so far.");
+    }
+
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -205,8 +253,11 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Ingest { .. } => {
-            println!("ingest: not yet implemented");
+        Commands::Ingest { stages, .. } => {
+            if let Err(e) = run_ingest(stages.as_deref()) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
         Commands::Search { .. } => {
             println!("search: not yet implemented");
