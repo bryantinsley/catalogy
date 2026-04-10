@@ -90,6 +90,17 @@ enum Commands {
 
     /// Show or edit configuration
     Config,
+
+    /// Transcode videos to optimize storage
+    Transcode {
+        /// Dry run - show what would be transcoded
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Process transcode queue
+        #[arg(long)]
+        run: bool,
+    },
 }
 
 fn default_state_db_path() -> PathBuf {
@@ -403,6 +414,103 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_transcode(dry_run: bool, run: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = default_state_db_path();
+    if !db_path.exists() {
+        println!("No state database found. Run `catalogy scan` first.");
+        return Ok(());
+    }
+
+    let db = catalogy_queue::StateDb::open(&db_path)?;
+    let config = catalogy_core::TranscodeConfig::default();
+
+    if dry_run {
+        let entries = catalogy_transcode::run_transcode_dry_run(&db, &config)?;
+
+        if entries.is_empty() {
+            println!("No video files found with metadata.");
+            return Ok(());
+        }
+
+        use comfy_table::{presets::UTF8_FULL, Table};
+
+        let mut table = Table::new();
+        table.load_preset(UTF8_FULL);
+        table.set_header(vec!["File", "Size", "Resolution", "Codec", "Decision", "Est. Savings"]);
+
+        let mut total_savings: i64 = 0;
+        let mut transcode_count = 0;
+
+        for entry in &entries {
+            let size_mb = entry.file_size as f64 / 1_048_576.0;
+            let (decision_str, savings_str) = match &entry.decision {
+                catalogy_transcode::TranscodeDecision::Skip { reason } => {
+                    (format!("Skip: {reason}"), "-".to_string())
+                }
+                catalogy_transcode::TranscodeDecision::Transcode {
+                    target_resolution,
+                    target_codec,
+                    estimated_savings_bytes,
+                } => {
+                    total_savings += estimated_savings_bytes;
+                    transcode_count += 1;
+                    (
+                        format!(
+                            "→ {}x{} {}",
+                            target_resolution.0, target_resolution.1, target_codec
+                        ),
+                        format!("{:.1} MB", *estimated_savings_bytes as f64 / 1_048_576.0),
+                    )
+                }
+            };
+
+            table.add_row(vec![
+                Path::new(&entry.file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| entry.file_path.clone()),
+                format!("{:.1} MB", size_mb),
+                entry.resolution.clone(),
+                entry.codec.clone(),
+                decision_str,
+                savings_str,
+            ]);
+        }
+
+        println!("{table}");
+        println!(
+            "\n{} videos evaluated, {} would be transcoded",
+            entries.len(),
+            transcode_count
+        );
+        if total_savings > 0 {
+            println!(
+                "Estimated total savings: {:.1} MB",
+                total_savings as f64 / 1_048_576.0
+            );
+        }
+    } else if run {
+        println!("Processing transcode queue...");
+        let stats =
+            catalogy_transcode::run_transcode_worker(&db, &config, "worker-main")?;
+        println!("\nTranscode complete:");
+        println!("  Completed: {}", stats.completed);
+        println!("  Skipped:   {}", stats.skipped);
+        println!("  Failed:    {}", stats.failed);
+        if stats.total_savings_bytes > 0 {
+            println!(
+                "  Total savings: {:.1} MB",
+                stats.total_savings_bytes as f64 / 1_048_576.0
+            );
+        }
+    } else {
+        println!("Usage: catalogy transcode --dry-run  (preview)");
+        println!("       catalogy transcode --run      (execute)");
+    }
+
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -460,6 +568,12 @@ fn main() {
         }
         Commands::Config => {
             println!("config: not yet implemented");
+        }
+        Commands::Transcode { dry_run, run } => {
+            if let Err(e) = run_transcode(dry_run, run) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }

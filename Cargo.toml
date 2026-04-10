@@ -9,6 +9,7 @@ members = [
     "crates/catalogy-catalog",
     "crates/catalogy-search",
     "crates/catalogy-server",
+    "crates/catalogy-transcode",
 ]
 resolver = "2"
 
@@ -28,6 +29,7 @@ catalogy-embed = { path = "crates/catalogy-embed" }
 catalogy-catalog = { path = "crates/catalogy-catalog" }
 catalogy-search = { path = "crates/catalogy-search" }
 catalogy-server = { path = "crates/catalogy-server" }
+catalogy-transcode = { path = "crates/catalogy-transcode" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 dirs = "5"

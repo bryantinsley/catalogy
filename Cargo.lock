@@ -1082,6 +1082,7 @@ dependencies = [
  "catalogy-scanner",
  "catalogy-search",
  "catalogy-server",
+ "catalogy-transcode",
  "chrono",
  "clap",
  "comfy-table",
@@ -1214,6 +1215,19 @@ dependencies = [
  "tokio-util",
  "tower",
  "tower-http",
+]
+
+[[package]]
+name = "catalogy-transcode"
+version = "0.1.0"
+dependencies = [
+ "catalogy-core",
+ "catalogy-metadata",
+ "catalogy-queue",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

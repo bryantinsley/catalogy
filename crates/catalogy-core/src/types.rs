@@ -75,6 +75,7 @@ pub enum JobStage {
     Embed,
     Index,
     ReEmbed,
+    Transcode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
