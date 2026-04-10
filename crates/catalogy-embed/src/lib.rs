@@ -1,13 +1,7 @@
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+pub mod image_encoder;
+pub mod session;
+pub mod text_encoder;
+pub mod worker;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!version().is_empty());
-    }
-}
+pub use session::{cosine_similarity, dedup_frames, l2_normalize, mean_pool, EmbedSession};
+pub use worker::{aggregate_video_frames, run_embed_worker};

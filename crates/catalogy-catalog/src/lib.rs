@@ -1,13 +1,6 @@
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+pub mod catalog;
+pub mod record;
+pub mod schema;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!version().is_empty());
-    }
-}
+pub use catalog::Catalog;
+pub use record::CatalogRecord;

@@ -226,6 +226,54 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         println!("Processed {processed} metadata jobs.");
     }
 
+    // Stage: embed
+    if should_run_stage(stages, "embed") {
+        println!("Processing embed jobs...");
+
+        // Determine model paths from environment or default locations
+        let model_dir = std::env::var("CATALOGY_MODEL_DIR").unwrap_or_else(|_| {
+            let data_dir = dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("catalogy")
+                .join("models");
+            data_dir.to_string_lossy().to_string()
+        });
+        let model_dir = Path::new(&model_dir);
+
+        let visual_model = model_dir.join("visual.onnx");
+        let text_model = model_dir.join("text.onnx");
+        let tokenizer = model_dir.join("tokenizer.json");
+
+        if !visual_model.exists() || !text_model.exists() || !tokenizer.exists() {
+            println!(
+                "Warning: CLIP model files not found in {}. Set CATALOGY_MODEL_DIR or place models at the default location.",
+                model_dir.display()
+            );
+            println!("  Expected: visual.onnx, text.onnx, tokenizer.json");
+            println!("  Skipping embed stage.");
+        } else {
+            let catalog_path = dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("catalogy")
+                .join("catalog.lance");
+            let catalog_path_str = catalog_path.to_string_lossy().to_string();
+
+            let session =
+                catalogy_embed::EmbedSession::new(&visual_model, &text_model, &tokenizer)?;
+            let catalog = catalogy_catalog::Catalog::open(&catalog_path_str)?;
+
+            let count = catalogy_embed::run_embed_worker(
+                &db,
+                &session,
+                &catalog,
+                "clip-vit-h-14",
+                "1",
+                "worker-main",
+            )?;
+            println!("Processed {count} embed jobs.");
+        }
+    }
+
     Ok(())
 }
 

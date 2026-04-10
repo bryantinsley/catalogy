@@ -5,3 +5,14 @@ edition = "2021"
 
 [dependencies]
 catalogy-core = { path = "../catalogy-core" }
+catalogy-catalog = { path = "../catalogy-catalog" }
+catalogy-queue = { path = "../catalogy-queue" }
+ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ndarray = "0.16"
+tokenizers = "0.21"
+uuid = { version = "1", features = ["v7"] }
+chrono = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
