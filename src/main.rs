@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(
@@ -112,11 +113,27 @@ fn default_extraction_config() -> catalogy_core::ExtractionConfig {
     }
 }
 
+fn model_dir() -> PathBuf {
+    match std::env::var("CATALOGY_MODEL_DIR") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("catalogy")
+            .join("models"),
+    }
+}
+
+fn catalog_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("catalogy")
+        .join("catalog.lance")
+}
+
 fn run_scan(scan_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = default_state_db_path();
     let db = catalogy_queue::StateDb::open(&db_path)?;
 
-    // Default extensions
     let image_exts: Vec<String> = vec![
         "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif", "avif",
     ]
@@ -191,7 +208,7 @@ fn run_status() -> Result<(), Box<dyn std::error::Error>> {
 
 fn should_run_stage(stages: Option<&str>, stage_name: &str) -> bool {
     match stages {
-        None => true, // No filter = run all stages
+        None => true,
         Some(s) => s.split(',').any(|s| s.trim() == stage_name),
     }
 }
@@ -206,14 +223,12 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let db = catalogy_queue::StateDb::open(&db_path)?;
     let config = default_extraction_config();
 
-    // Stage: extract_frames
     if should_run_stage(stages, "frames") || should_run_stage(stages, "extract_frames") {
         println!("Processing extract_frames jobs...");
         let count = catalogy_extract::run_extract_frames_worker(&db, &config, "worker-main")?;
         println!("Processed {count} extract_frames jobs.");
     }
 
-    // Stage: extract_metadata
     if should_run_stage(stages, "metadata") || should_run_stage(stages, "extract_metadata") {
         println!("Processing extract_metadata jobs...");
         let ffprobe = catalogy_metadata::find_ffprobe(config.ffprobe_path.as_deref());
@@ -226,37 +241,23 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         println!("Processed {processed} metadata jobs.");
     }
 
-    // Stage: embed
     if should_run_stage(stages, "embed") {
         println!("Processing embed jobs...");
 
-        // Determine model paths from environment or default locations
-        let model_dir = std::env::var("CATALOGY_MODEL_DIR").unwrap_or_else(|_| {
-            let data_dir = dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("catalogy")
-                .join("models");
-            data_dir.to_string_lossy().to_string()
-        });
-        let model_dir = Path::new(&model_dir);
-
-        let visual_model = model_dir.join("visual.onnx");
-        let text_model = model_dir.join("text.onnx");
-        let tokenizer = model_dir.join("tokenizer.json");
+        let mdir = model_dir();
+        let visual_model = mdir.join("visual.onnx");
+        let text_model = mdir.join("text.onnx");
+        let tokenizer = mdir.join("tokenizer.json");
 
         if !visual_model.exists() || !text_model.exists() || !tokenizer.exists() {
             println!(
                 "Warning: CLIP model files not found in {}. Set CATALOGY_MODEL_DIR or place models at the default location.",
-                model_dir.display()
+                mdir.display()
             );
             println!("  Expected: visual.onnx, text.onnx, tokenizer.json");
             println!("  Skipping embed stage.");
         } else {
-            let catalog_path = dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("catalogy")
-                .join("catalog.lance");
-            let catalog_path_str = catalog_path.to_string_lossy().to_string();
+            let catalog_path_str = catalog_path().to_string_lossy().to_string();
 
             let session =
                 catalogy_embed::EmbedSession::new(&visual_model, &text_model, &tokenizer)?;
@@ -273,6 +274,131 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
             println!("Processed {count} embed jobs.");
         }
     }
+
+    Ok(())
+}
+
+fn run_search(
+    query_text: &str,
+    limit: usize,
+    media_type: Option<&str>,
+    after: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut full_query = String::new();
+    if let Some(mt) = media_type {
+        full_query.push_str(&format!("type:{} ", mt));
+    }
+    if let Some(a) = after {
+        full_query.push_str(&format!("after:{} ", a));
+    }
+    full_query.push_str(query_text);
+
+    let query = catalogy_search::parse_query(&full_query, limit);
+
+    let mdir = model_dir();
+    let visual_model = mdir.join("visual.onnx");
+    let text_model = mdir.join("text.onnx");
+    let tokenizer = mdir.join("tokenizer.json");
+
+    if !visual_model.exists() || !text_model.exists() || !tokenizer.exists() {
+        eprintln!("Error: CLIP model files not found in {}", mdir.display());
+        eprintln!("Set CATALOGY_MODEL_DIR to the directory containing:");
+        eprintln!("  visual.onnx, text.onnx, tokenizer.json");
+        std::process::exit(1);
+    }
+
+    let session = Arc::new(catalogy_embed::EmbedSession::new(
+        &visual_model,
+        &text_model,
+        &tokenizer,
+    )?);
+    let catalog = Arc::new(catalogy_catalog::Catalog::open(
+        &catalog_path().to_string_lossy(),
+    )?);
+
+    let engine = catalogy_search::SearchEngine::new(session, catalog);
+    let results = engine.search(&query)?;
+
+    if results.is_empty() {
+        println!("No results found.");
+        return Ok(());
+    }
+
+    use comfy_table::{presets::UTF8_FULL, Table};
+
+    let mut table = Table::new();
+    table.load_preset(UTF8_FULL);
+    table.set_header(vec!["Rank", "Score", "Filename", "Type", "Dimensions", "Path"]);
+
+    for (i, r) in results.iter().enumerate() {
+        let dims = match (r.metadata.width, r.metadata.height) {
+            (Some(w), Some(h)) => format!("{}x{}", w, h),
+            _ => "-".to_string(),
+        };
+        let type_str = match r.media_type {
+            catalogy_core::MediaType::Image => "image",
+            catalogy_core::MediaType::Video => "video",
+            catalogy_core::MediaType::VideoFrame => "frame",
+        };
+        table.add_row(vec![
+            format!("{}", i + 1),
+            format!("{:.3}", r.score),
+            r.file_name.clone(),
+            type_str.to_string(),
+            dims,
+            r.file_path.to_string_lossy().to_string(),
+        ]);
+    }
+
+    println!("{table}");
+    println!("\n{} result(s) found.", results.len());
+
+    Ok(())
+}
+
+fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let catalog = Arc::new(catalogy_catalog::Catalog::open(
+        &catalog_path().to_string_lossy(),
+    )?);
+
+    let mdir = model_dir();
+    let visual_model = mdir.join("visual.onnx");
+    let text_model = mdir.join("text.onnx");
+    let tokenizer_path = mdir.join("tokenizer.json");
+
+    let search_engine = if visual_model.exists() && text_model.exists() && tokenizer_path.exists() {
+        match catalogy_embed::EmbedSession::new(&visual_model, &text_model, &tokenizer_path) {
+            Ok(session) => {
+                let session = Arc::new(session);
+                Some(catalogy_search::SearchEngine::new(session, catalog.clone()))
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to load CLIP models: {e}");
+                eprintln!("Search will be unavailable.");
+                None
+            }
+        }
+    } else {
+        eprintln!("Warning: CLIP model files not found in {}", mdir.display());
+        eprintln!("Search will be unavailable. Set CATALOGY_MODEL_DIR to enable search.");
+        None
+    };
+
+    let state = Arc::new(catalogy_server::AppState {
+        catalog,
+        search_engine,
+    });
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let app = catalogy_server::create_router(state);
+        let addr = format!("0.0.0.0:{}", port);
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        println!("Catalogy server running at http://localhost:{port}");
+        println!("Press Ctrl+C to stop.");
+        axum::serve(listener, app).await?;
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })?;
 
     Ok(())
 }
@@ -312,14 +438,25 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Search { .. } => {
-            println!("search: not yet implemented");
+        Commands::Search {
+            query,
+            limit,
+            media_type,
+            after,
+        } => {
+            if let Err(e) = run_search(&query, limit, media_type.as_deref(), after.as_deref()) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
         Commands::Reembed { .. } => {
             println!("reembed: not yet implemented");
         }
-        Commands::Serve { .. } => {
-            println!("serve: not yet implemented");
+        Commands::Serve { port } => {
+            if let Err(e) = run_serve(port) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
         Commands::Config => {
             println!("config: not yet implemented");

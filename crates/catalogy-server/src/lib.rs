@@ -1,13 +1,4 @@
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+pub mod api;
+pub mod app;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!version().is_empty());
-    }
-}
+pub use app::{create_router, AppState};

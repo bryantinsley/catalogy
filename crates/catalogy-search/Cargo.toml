@@ -5,3 +5,10 @@ edition = "2021"
 
 [dependencies]
 catalogy-core = { path = "../catalogy-core" }
+catalogy-embed = { path = "../catalogy-embed" }
+catalogy-catalog = { path = "../catalogy-catalog" }
+chrono = "0.4"
+uuid = { version = "1", features = ["v7"] }
+
+[dev-dependencies]
+tempfile = "3"

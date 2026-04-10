@@ -1,13 +1,5 @@
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+pub mod engine;
+pub mod query;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!version().is_empty());
-    }
-}
+pub use engine::SearchEngine;
+pub use query::parse_query;
