@@ -176,6 +176,29 @@ fn run_status() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_ingest_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = default_state_db_path();
+    if !db_path.exists() {
+        println!("No state database found. Run `catalogy scan` first.");
+        return Ok(());
+    }
+
+    let db = catalogy_queue::StateDb::open(&db_path)?;
+
+    // Detect ffprobe
+    let ffprobe = catalogy_metadata::find_ffprobe(None);
+    if let Some(ref fp) = ffprobe {
+        println!("Using ffprobe: {}", fp.display());
+    } else {
+        println!("Warning: ffprobe not found. Video metadata extraction will be skipped.");
+    }
+
+    let processed = catalogy_metadata::run_metadata_worker(&db, ffprobe.as_deref(), true)?;
+
+    println!("Processed {processed} metadata jobs.");
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -205,8 +228,20 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Ingest { .. } => {
-            println!("ingest: not yet implemented");
+        Commands::Ingest { stages, .. } => {
+            let run_metadata = stages
+                .as_ref()
+                .map(|s| s.contains("metadata"))
+                .unwrap_or(true);
+
+            if run_metadata {
+                if let Err(e) = run_ingest_metadata() {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            } else {
+                println!("No matching stages to process.");
+            }
         }
         Commands::Search { .. } => {
             println!("search: not yet implemented");

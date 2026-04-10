@@ -107,6 +107,26 @@ impl StateDb {
                     key             TEXT PRIMARY KEY,
                     value           TEXT NOT NULL,
                     updated_at      TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS metadata (
+                    file_hash           TEXT PRIMARY KEY,
+                    width               INTEGER,
+                    height              INTEGER,
+                    duration_ms         INTEGER,
+                    fps                 REAL,
+                    codec               TEXT,
+                    bitrate_kbps        INTEGER,
+                    exif_camera_make    TEXT,
+                    exif_camera_model   TEXT,
+                    exif_date_taken     TEXT,
+                    exif_gps_lat        REAL,
+                    exif_gps_lon        REAL,
+                    exif_focal_length_mm REAL,
+                    exif_iso            INTEGER,
+                    exif_orientation    INTEGER,
+                    extracted_at        TEXT NOT NULL,
+                    FOREIGN KEY (file_hash) REFERENCES files(file_hash)
                 );",
             )
             .map_err(|e| CatalogyError::Database(e.to_string()))
@@ -472,6 +492,73 @@ impl StateDb {
             .map_err(|e| CatalogyError::Database(e.to_string()))?;
         Ok(result)
     }
+
+    // ── Metadata table ─────────────────────────────────────
+
+    /// Store extracted metadata for a file.
+    pub fn store_metadata(
+        &self,
+        file_hash: &str,
+        metadata: &catalogy_core::MediaMetadata,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let (exif_make, exif_model, exif_date, exif_lat, exif_lon, exif_fl, exif_iso, exif_orient) =
+            match &metadata.exif {
+                Some(exif) => (
+                    exif.camera_make.as_deref(),
+                    exif.camera_model.as_deref(),
+                    exif.date_taken.map(|d| d.to_string()),
+                    exif.gps_lat,
+                    exif.gps_lon,
+                    exif.focal_length_mm,
+                    exif.iso,
+                    exif.orientation.map(|o| o as u32),
+                ),
+                None => (None, None, None, None, None, None, None, None),
+            };
+
+        self.conn
+            .execute(
+                "INSERT INTO metadata (file_hash, width, height, duration_ms, fps, codec,
+                    bitrate_kbps, exif_camera_make, exif_camera_model, exif_date_taken,
+                    exif_gps_lat, exif_gps_lon, exif_focal_length_mm, exif_iso,
+                    exif_orientation, extracted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                 ON CONFLICT(file_hash) DO UPDATE SET
+                    width = excluded.width, height = excluded.height,
+                    duration_ms = excluded.duration_ms, fps = excluded.fps,
+                    codec = excluded.codec, bitrate_kbps = excluded.bitrate_kbps,
+                    exif_camera_make = excluded.exif_camera_make,
+                    exif_camera_model = excluded.exif_camera_model,
+                    exif_date_taken = excluded.exif_date_taken,
+                    exif_gps_lat = excluded.exif_gps_lat,
+                    exif_gps_lon = excluded.exif_gps_lon,
+                    exif_focal_length_mm = excluded.exif_focal_length_mm,
+                    exif_iso = excluded.exif_iso,
+                    exif_orientation = excluded.exif_orientation,
+                    extracted_at = excluded.extracted_at",
+                params![
+                    file_hash,
+                    metadata.width,
+                    metadata.height,
+                    metadata.duration_ms,
+                    metadata.fps,
+                    metadata.codec,
+                    metadata.bitrate_kbps,
+                    exif_make,
+                    exif_model,
+                    exif_date,
+                    exif_lat,
+                    exif_lon,
+                    exif_fl,
+                    exif_iso,
+                    exif_orient,
+                    now,
+                ],
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(())
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -504,12 +591,12 @@ mod tests {
         let count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('files','jobs','models','config_state')",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('files','jobs','models','config_state','metadata')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 5);
     }
 
     #[test]

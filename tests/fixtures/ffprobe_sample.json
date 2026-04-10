@@ -1,0 +1,40 @@
+{
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "h264",
+            "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+            "codec_type": "video",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30000/1001",
+            "avg_frame_rate": "30000/1001",
+            "time_base": "1/30000",
+            "duration_ts": 3603600,
+            "duration": "120.120000",
+            "bit_rate": "4500000",
+            "pix_fmt": "yuv420p"
+        },
+        {
+            "index": 1,
+            "codec_name": "aac",
+            "codec_long_name": "AAC (Advanced Audio Coding)",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels": 2,
+            "bit_rate": "128000"
+        }
+    ],
+    "format": {
+        "filename": "sample_video.mp4",
+        "nb_streams": 2,
+        "nb_programs": 0,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "start_time": "0.000000",
+        "duration": "120.120000",
+        "size": "69069420",
+        "bit_rate": "4600000",
+        "probe_score": 100
+    }
+}
