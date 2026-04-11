@@ -11,6 +11,7 @@ members = [
     "crates/catalogy-server",
     "crates/catalogy-dedup",
     "crates/catalogy-transcode",
+    "crates/catalogy-setup",
 ]
 resolver = "2"
 
@@ -32,6 +33,7 @@ catalogy-search = { path = "crates/catalogy-search" }
 catalogy-server = { path = "crates/catalogy-server" }
 catalogy-dedup = { path = "crates/catalogy-dedup" }
 catalogy-transcode = { path = "crates/catalogy-transcode" }
+catalogy-setup = { path = "crates/catalogy-setup" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 dirs = "5"
