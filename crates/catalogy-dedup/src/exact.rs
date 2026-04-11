@@ -51,10 +51,22 @@ mod tests {
     #[test]
     fn test_find_exact_duplicates_no_duplicates() {
         let db = StateDb::open_in_memory().unwrap();
-        db.upsert_file("hash1", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
-            .unwrap();
-        db.upsert_file("hash2", "/b.jpg", 200, "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
-            .unwrap();
+        db.upsert_file(
+            "hash1",
+            "/a.jpg",
+            100,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        )
+        .unwrap();
+        db.upsert_file(
+            "hash2",
+            "/b.jpg",
+            200,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        )
+        .unwrap();
 
         let sets = find_exact_duplicates(&db).unwrap();
         assert!(sets.is_empty());
@@ -65,8 +77,14 @@ mod tests {
         let db = StateDb::open_in_memory().unwrap();
 
         // Insert initial files to satisfy foreign key if needed
-        db.upsert_file("hash1", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
-            .unwrap();
+        db.upsert_file(
+            "hash1",
+            "/a.jpg",
+            100,
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00:00Z",
+        )
+        .unwrap();
 
         // Modify the table to allow duplicate hashes for testing.
         // The standard schema has file_hash as PK, so we drop and recreate.

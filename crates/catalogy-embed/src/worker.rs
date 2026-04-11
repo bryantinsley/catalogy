@@ -2,9 +2,9 @@ use catalogy_catalog::{Catalog, CatalogRecord};
 use catalogy_core::{JobStage, Result};
 use catalogy_queue::StateDb;
 
-use crate::session::{dedup_frames, mean_pool, EmbedSession};
 #[cfg(test)]
 use crate::session::l2_normalize;
+use crate::session::{dedup_frames, mean_pool, EmbedSession};
 
 /// Run the embed worker loop: claim embed jobs, run inference, write to catalog.
 /// Returns the number of jobs processed.

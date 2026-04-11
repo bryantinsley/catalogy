@@ -26,9 +26,10 @@ impl ClipTokenizer {
     /// Tokenize text into input_ids with CLIP-style padding/truncation.
     /// Returns shape [1, 77] i64 tensor.
     pub fn tokenize(&self, text: &str) -> Result<Array2<i64>> {
-        let encoding = self.tokenizer.encode(text, true).map_err(|e| {
-            CatalogyError::Embedding(format!("Tokenization failed: {}", e))
-        })?;
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| CatalogyError::Embedding(format!("Tokenization failed: {}", e)))?;
 
         let mut ids = encoding
             .get_ids()

@@ -13,7 +13,11 @@ const CLIP_INPUT_SIZE: u32 = 224;
 /// Returns an ndarray of shape [1, 3, 224, 224].
 pub fn preprocess_image(image_path: &Path) -> Result<Array4<f32>> {
     let img = image::open(image_path).map_err(|e| {
-        CatalogyError::Embedding(format!("Failed to open image {}: {}", image_path.display(), e))
+        CatalogyError::Embedding(format!(
+            "Failed to open image {}: {}",
+            image_path.display(),
+            e
+        ))
     })?;
     preprocess_dynamic_image(&img)
 }
@@ -29,11 +33,18 @@ pub fn preprocess_dynamic_image(img: &DynamicImage) -> Result<Array4<f32>> {
 /// Preprocess a batch of images for CLIP inference.
 /// Returns an ndarray of shape [N, 3, 224, 224].
 pub fn preprocess_image_batch(image_paths: &[impl AsRef<Path>]) -> Result<Array4<f32>> {
-    let mut batch = Array4::<f32>::zeros((image_paths.len(), 3, CLIP_INPUT_SIZE as usize, CLIP_INPUT_SIZE as usize));
+    let mut batch = Array4::<f32>::zeros((
+        image_paths.len(),
+        3,
+        CLIP_INPUT_SIZE as usize,
+        CLIP_INPUT_SIZE as usize,
+    ));
 
     for (i, path) in image_paths.iter().enumerate() {
         let single = preprocess_image(path.as_ref())?;
-        batch.slice_mut(ndarray::s![i, .., .., ..]).assign(&single.slice(ndarray::s![0, .., .., ..]));
+        batch
+            .slice_mut(ndarray::s![i, .., .., ..])
+            .assign(&single.slice(ndarray::s![0, .., .., ..]));
     }
 
     Ok(batch)
@@ -45,9 +56,15 @@ pub fn resize_and_center_crop(img: &DynamicImage, target_size: u32) -> RgbImage 
 
     // Resize so shortest side = target_size
     let (new_w, new_h) = if w < h {
-        (target_size, (target_size as f64 * h as f64 / w as f64).round() as u32)
+        (
+            target_size,
+            (target_size as f64 * h as f64 / w as f64).round() as u32,
+        )
     } else {
-        ((target_size as f64 * w as f64 / h as f64).round() as u32, target_size)
+        (
+            (target_size as f64 * w as f64 / h as f64).round() as u32,
+            target_size,
+        )
     };
 
     let resized = img.resize_exact(new_w, new_h, FilterType::Lanczos3);

@@ -89,7 +89,13 @@ mod tests {
     #[test]
     fn test_schema_nullable_fields() {
         let schema = media_schema();
-        for name in &["width", "height", "codec", "exif_camera_make", "exif_gps_lat"] {
+        for name in &[
+            "width",
+            "height",
+            "codec",
+            "exif_camera_make",
+            "exif_gps_lat",
+        ] {
             let field = schema.field_with_name(name).unwrap();
             assert!(field.is_nullable(), "{} should be nullable", name);
         }

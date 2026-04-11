@@ -113,7 +113,9 @@ fn probe_media(path: &Path, ffprobe_path: &Path) -> Result<ProbeInfo> {
         .map_err(|e| CatalogyError::Transcode(format!("ffprobe failed: {e}")))?;
 
     if !output.status.success() {
-        return Err(CatalogyError::Transcode("ffprobe returned error".to_string()));
+        return Err(CatalogyError::Transcode(
+            "ffprobe returned error".to_string(),
+        ));
     }
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)

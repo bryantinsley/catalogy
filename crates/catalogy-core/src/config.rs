@@ -184,7 +184,10 @@ archive_dir = "/nas/archive"
         assert_eq!(config.transcode.target_crf, 18);
         assert!(!config.transcode.use_hw_encoder);
         assert_eq!(config.transcode.original_policy, "archive");
-        assert_eq!(config.transcode.archive_dir, Some("/nas/archive".to_string()));
+        assert_eq!(
+            config.transcode.archive_dir,
+            Some("/nas/archive".to_string())
+        );
     }
 
     #[test]

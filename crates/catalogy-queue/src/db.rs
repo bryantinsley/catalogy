@@ -798,8 +798,9 @@ impl StateDb {
                     Some(catalogy_core::ExifData {
                         camera_make: exif_make,
                         camera_model: exif_model,
-                        date_taken: exif_date
-                            .and_then(|d| chrono::NaiveDateTime::parse_from_str(&d, "%Y-%m-%d %H:%M:%S").ok()),
+                        date_taken: exif_date.and_then(|d| {
+                            chrono::NaiveDateTime::parse_from_str(&d, "%Y-%m-%d %H:%M:%S").ok()
+                        }),
                         gps_lat: exif_lat,
                         gps_lon: exif_lon,
                         focal_length_mm: exif_fl,
@@ -1279,10 +1280,8 @@ mod tests {
     #[test]
     fn test_list_models() {
         let db = test_db();
-        db.register_model("model-a", "1", "/a.onnx", 512)
-            .unwrap();
-        db.register_model("model-b", "1", "/b.onnx", 1024)
-            .unwrap();
+        db.register_model("model-a", "1", "/a.onnx", 512).unwrap();
+        db.register_model("model-b", "1", "/b.onnx", 1024).unwrap();
 
         let models = db.list_models().unwrap();
         assert_eq!(models.len(), 2);
@@ -1304,10 +1303,8 @@ mod tests {
     #[test]
     fn test_set_current_model() {
         let db = test_db();
-        db.register_model("model-a", "1", "/a.onnx", 512)
-            .unwrap();
-        db.register_model("model-b", "1", "/b.onnx", 1024)
-            .unwrap();
+        db.register_model("model-a", "1", "/a.onnx", 512).unwrap();
+        db.register_model("model-b", "1", "/b.onnx", 1024).unwrap();
 
         db.set_current_model("model-a").unwrap();
         let current = db.get_current_model().unwrap().unwrap();
@@ -1339,12 +1336,30 @@ mod tests {
     #[test]
     fn test_enqueue_reembed() {
         let db = test_db();
-        db.upsert_file("a", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
-            .unwrap();
-        db.upsert_file("b", "/b.jpg", 200, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
-            .unwrap();
-        db.upsert_file("c", "/c.jpg", 300, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
-            .unwrap();
+        db.upsert_file(
+            "a",
+            "/a.jpg",
+            100,
+            "2024-01-01T00:00:00Z",
+            "2024-06-01T00:00:00Z",
+        )
+        .unwrap();
+        db.upsert_file(
+            "b",
+            "/b.jpg",
+            200,
+            "2024-01-01T00:00:00Z",
+            "2024-06-01T00:00:00Z",
+        )
+        .unwrap();
+        db.upsert_file(
+            "c",
+            "/c.jpg",
+            300,
+            "2024-01-01T00:00:00Z",
+            "2024-06-01T00:00:00Z",
+        )
+        .unwrap();
 
         let count = db.enqueue_reembed("new-model", "2").unwrap();
         assert_eq!(count, 3);
@@ -1360,8 +1375,14 @@ mod tests {
     #[test]
     fn test_enqueue_reembed_idempotent() {
         let db = test_db();
-        db.upsert_file("a", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
-            .unwrap();
+        db.upsert_file(
+            "a",
+            "/a.jpg",
+            100,
+            "2024-01-01T00:00:00Z",
+            "2024-06-01T00:00:00Z",
+        )
+        .unwrap();
 
         let count1 = db.enqueue_reembed("new-model", "2").unwrap();
         assert_eq!(count1, 1);
@@ -1381,10 +1402,22 @@ mod tests {
     #[test]
     fn test_enqueue_reembed_skips_deleted() {
         let db = test_db();
-        db.upsert_file("a", "/a.jpg", 100, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
-            .unwrap();
-        db.upsert_file("b", "/b.jpg", 200, "2024-01-01T00:00:00Z", "2024-06-01T00:00:00Z")
-            .unwrap();
+        db.upsert_file(
+            "a",
+            "/a.jpg",
+            100,
+            "2024-01-01T00:00:00Z",
+            "2024-06-01T00:00:00Z",
+        )
+        .unwrap();
+        db.upsert_file(
+            "b",
+            "/b.jpg",
+            200,
+            "2024-01-01T00:00:00Z",
+            "2024-06-01T00:00:00Z",
+        )
+        .unwrap();
         db.mark_file_deleted("b", "2024-07-01T00:00:00Z").unwrap();
 
         let count = db.enqueue_reembed("new-model", "2").unwrap();

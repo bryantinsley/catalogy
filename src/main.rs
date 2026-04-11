@@ -512,7 +512,14 @@ fn run_search(
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
-    table.set_header(vec!["Rank", "Score", "Filename", "Type", "Dimensions", "Path"]);
+    table.set_header(vec![
+        "Rank",
+        "Score",
+        "Filename",
+        "Type",
+        "Dimensions",
+        "Path",
+    ]);
 
     for (i, r) in results.iter().enumerate() {
         let dims = match (r.metadata.width, r.metadata.height) {
@@ -546,7 +553,9 @@ fn run_dedup(tier: &str, threshold: f32) -> Result<(), Box<dyn std::error::Error
     let run_cross = tier == "all" || tier == "cross-video";
 
     if !run_exact && !run_visual && !run_cross {
-        return Err(format!("Unknown tier: {tier}. Use: exact, visual, cross-video, or all").into());
+        return Err(
+            format!("Unknown tier: {tier}. Use: exact, visual, cross-video, or all").into(),
+        );
     }
 
     if run_exact {
@@ -652,7 +661,12 @@ fn run_reembed(
         }
 
         db.register_model(mid, model_version, mpath, dimensions)?;
-        info!(model_id = mid, version = model_version, dimensions, "Model registered");
+        info!(
+            model_id = mid,
+            version = model_version,
+            dimensions,
+            "Model registered"
+        );
         println!("Registered model '{mid}' (version={model_version}, dimensions={dimensions})");
         println!("  Path: {mpath}");
         println!("Use --activate --model-id {mid} to set as current and create re-embed jobs.");
@@ -662,12 +676,10 @@ fn run_reembed(
     if activate {
         let mid = model_id.ok_or("--model-id is required for --activate")?;
 
-        let model = db
-            .get_model(mid)?
-            .ok_or(format!(
-                "Model '{}' not found. Register it first with --register.",
-                mid
-            ))?;
+        let model = db.get_model(mid)?.ok_or(format!(
+            "Model '{}' not found. Register it first with --register.",
+            mid
+        ))?;
 
         db.set_current_model(mid)?;
         info!(model_id = mid, "Model activated");
@@ -677,7 +689,9 @@ fn run_reembed(
         println!("Created {job_count} re-embed jobs.");
 
         if job_count > 0 {
-            println!("Run `catalogy ingest --stages embed` or the re-embed worker to process them.");
+            println!(
+                "Run `catalogy ingest --stages embed` or the re-embed worker to process them."
+            );
         }
         return Ok(());
     }
@@ -693,7 +707,11 @@ fn run_reembed(
         }
 
         let num_partitions = std::cmp::max(1, (count as f64).sqrt() as u32);
-        info!(rows = count, partitions = num_partitions, "Rebuilding ANN index");
+        info!(
+            rows = count,
+            partitions = num_partitions,
+            "Rebuilding ANN index"
+        );
         let pb = make_spinner("Rebuilding ANN index...");
         catalog.build_index(num_partitions)?;
         pb.finish_with_message("Index rebuilt successfully");
@@ -916,9 +934,13 @@ fn check_command_version(cmd: &str) -> Option<String> {
         .and_then(|o| {
             let stdout = String::from_utf8_lossy(&o.stdout);
             stdout.lines().next().and_then(|line| {
-                line.split("version")
-                    .nth(1)
-                    .map(|v| v.trim().split_whitespace().next().unwrap_or("unknown").to_string())
+                line.split("version").nth(1).map(|v| {
+                    v.trim()
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("unknown")
+                        .to_string()
+                })
             })
         })
 }
@@ -1042,8 +1064,8 @@ fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
 fn setup_logging() {
     use tracing_subscriber::EnvFilter;
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("catalogy=info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("catalogy=info"));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)

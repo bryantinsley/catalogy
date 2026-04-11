@@ -94,7 +94,11 @@ impl SearchEngine {
             .collect();
 
         // Sort by score descending
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(results)
     }
@@ -128,8 +132,7 @@ fn record_to_search_result(record: CatalogRecord, score: f32) -> SearchResult {
         timestamp_ms: record.frame_timestamp_ms.unwrap_or(0) as u64,
     });
 
-    let id = uuid::Uuid::parse_str(&record.id)
-        .unwrap_or_else(|_| uuid::Uuid::now_v7());
+    let id = uuid::Uuid::parse_str(&record.id).unwrap_or_else(|_| uuid::Uuid::now_v7());
 
     SearchResult {
         id,

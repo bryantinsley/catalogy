@@ -330,9 +330,7 @@ pub async fn stats_handler(
         )
     })?;
 
-    Ok(Json(StatsResponse {
-        total_items: total,
-    }))
+    Ok(Json(StatsResponse { total_items: total }))
 }
 
 pub async fn dedup_handler(
@@ -457,8 +455,7 @@ pub async fn stats_full_handler(
 ) -> Result<Json<FullStatsResponse>, (StatusCode, String)> {
     let total_items = state.catalog.count().unwrap_or(0);
 
-    let (files_tracked, queue, last_scan, models) = if let Some(ref db_path) = state.state_db_path
-    {
+    let (files_tracked, queue, last_scan, models) = if let Some(ref db_path) = state.state_db_path {
         let db = catalogy_queue::StateDb::open(db_path).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -568,12 +565,29 @@ pub async fn files_handler(
                 match mt.as_str() {
                     "image" => matches!(
                         ext.as_str(),
-                        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "tif" | "webp"
-                            | "heic" | "heif" | "avif"
+                        "jpg"
+                            | "jpeg"
+                            | "png"
+                            | "gif"
+                            | "bmp"
+                            | "tiff"
+                            | "tif"
+                            | "webp"
+                            | "heic"
+                            | "heif"
+                            | "avif"
                     ),
                     "video" => matches!(
                         ext.as_str(),
-                        "mp4" | "mov" | "avi" | "mkv" | "wmv" | "flv" | "webm" | "m4v" | "mpg"
+                        "mp4"
+                            | "mov"
+                            | "avi"
+                            | "mkv"
+                            | "wmv"
+                            | "flv"
+                            | "webm"
+                            | "m4v"
+                            | "mpg"
                             | "mpeg"
                     ),
                     _ => true,
@@ -622,8 +636,17 @@ pub async fn files_handler(
                 .to_lowercase();
             let media_type = if matches!(
                 ext.as_str(),
-                "jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "tif" | "webp" | "heic"
-                    | "heif" | "avif"
+                "jpg"
+                    | "jpeg"
+                    | "png"
+                    | "gif"
+                    | "bmp"
+                    | "tiff"
+                    | "tif"
+                    | "webp"
+                    | "heic"
+                    | "heif"
+                    | "avif"
             ) {
                 "image"
             } else if matches!(
@@ -935,11 +958,9 @@ pub async fn browse_handler(
 
     let mut sorted = filtered;
     match params.sort.as_str() {
-        "name" => sorted.sort_by(|a, b| {
-            a.file_name
-                .to_lowercase()
-                .cmp(&b.file_name.to_lowercase())
-        }),
+        "name" => {
+            sorted.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()))
+        }
         "size" => sorted.sort_by(|a, b| b.file_size.cmp(&a.file_size)),
         _ => sorted.sort_by(|a, b| b.indexed_at.cmp(&a.indexed_at)),
     }
@@ -960,11 +981,7 @@ pub async fn browse_handler(
         })
         .collect();
 
-    Ok(Json(BrowseResponse {
-        items,
-        total,
-        page,
-    }))
+    Ok(Json(BrowseResponse { items, total, page }))
 }
 
 #[cfg(test)]

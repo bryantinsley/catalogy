@@ -3,7 +3,9 @@ use catalogy_core::{MediaMetadata, TranscodeConfig};
 /// Result of the transcode decision engine.
 #[derive(Clone, Debug)]
 pub enum TranscodeDecision {
-    Skip { reason: String },
+    Skip {
+        reason: String,
+    },
     Transcode {
         target_resolution: (u32, u32),
         target_codec: String,

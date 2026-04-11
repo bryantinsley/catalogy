@@ -73,8 +73,8 @@ pub fn build_ffmpeg_args(
     } else {
         // For VideoToolbox, use -q:v for quality (1-100, lower = better)
         // Map CRF roughly: CRF 18 → q:v 40, CRF 23 → q:v 55, CRF 28 → q:v 70
-        let quality = ((config.target_crf as f32 - 18.0) / 10.0 * 30.0 + 40.0)
-            .clamp(20.0, 85.0) as u32;
+        let quality =
+            ((config.target_crf as f32 - 18.0) / 10.0 * 30.0 + 40.0).clamp(20.0, 85.0) as u32;
         args.push("-q:v".to_string());
         args.push(quality.to_string());
     }
@@ -108,9 +108,8 @@ pub fn transcode_video(
     output_path: &Path,
     config: &TranscodeConfig,
 ) -> Result<TranscodeResult> {
-    let ffmpeg = find_ffmpeg().ok_or_else(|| {
-        CatalogyError::Transcode("ffmpeg not found on PATH".to_string())
-    })?;
+    let ffmpeg = find_ffmpeg()
+        .ok_or_else(|| CatalogyError::Transcode("ffmpeg not found on PATH".to_string()))?;
 
     let input_size = std::fs::metadata(input_path)
         .map_err(|e| CatalogyError::Transcode(format!("cannot read input file: {e}")))?
@@ -118,8 +117,9 @@ pub fn transcode_video(
 
     // Ensure output directory exists
     if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| CatalogyError::Transcode(format!("cannot create output directory: {e}")))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            CatalogyError::Transcode(format!("cannot create output directory: {e}"))
+        })?;
     }
 
     let args = build_ffmpeg_args(input_path, output_path, config);
@@ -275,25 +275,13 @@ mod tests {
 
     #[test]
     fn test_staging_output_path() {
-        let path = staging_output_path(
-            Path::new("/videos/my_video.mov"),
-            "/tmp/staging",
-        );
-        assert_eq!(
-            path,
-            PathBuf::from("/tmp/staging/my_video_transcoded.mp4")
-        );
+        let path = staging_output_path(Path::new("/videos/my_video.mov"), "/tmp/staging");
+        assert_eq!(path, PathBuf::from("/tmp/staging/my_video_transcoded.mp4"));
     }
 
     #[test]
     fn test_staging_output_path_nested() {
-        let path = staging_output_path(
-            Path::new("/nas/media/vacation/clip.avi"),
-            "/tmp/staging",
-        );
-        assert_eq!(
-            path,
-            PathBuf::from("/tmp/staging/clip_transcoded.mp4")
-        );
+        let path = staging_output_path(Path::new("/nas/media/vacation/clip.avi"), "/tmp/staging");
+        assert_eq!(path, PathBuf::from("/tmp/staging/clip_transcoded.mp4"));
     }
 }

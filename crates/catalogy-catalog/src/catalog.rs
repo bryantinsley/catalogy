@@ -41,12 +41,9 @@ impl Catalog {
             .map_err(|e| CatalogyError::Database(format!("Failed to create runtime: {}", e)))?;
 
         let connection = rt.block_on(async {
-            lancedb::connect(path)
-                .execute()
-                .await
-                .map_err(|e| {
-                    CatalogyError::Database(format!("Failed to connect to LanceDB: {}", e))
-                })
+            lancedb::connect(path).execute().await.map_err(|e| {
+                CatalogyError::Database(format!("Failed to connect to LanceDB: {}", e))
+            })
         })?;
 
         Ok(Self { connection, rt })
@@ -150,15 +147,11 @@ impl Catalog {
 
             let results = table
                 .vector_search(query_vector)
-                .map_err(|e| {
-                    CatalogyError::Database(format!("Vector search setup failed: {}", e))
-                })?
+                .map_err(|e| CatalogyError::Database(format!("Vector search setup failed: {}", e)))?
                 .limit(limit)
                 .execute()
                 .await
-                .map_err(|e| {
-                    CatalogyError::Database(format!("Vector search failed: {}", e))
-                })?;
+                .map_err(|e| CatalogyError::Database(format!("Vector search failed: {}", e)))?;
 
             let batches = collect_batches(results).await?;
             let mut results_with_scores = Vec::new();
@@ -302,9 +295,7 @@ impl Catalog {
                     .create_table(TABLE_NAME, Box::new(reader))
                     .execute()
                     .await
-                    .map_err(|e| {
-                        CatalogyError::Database(format!("Failed to create table: {}", e))
-                    })
+                    .map_err(|e| CatalogyError::Database(format!("Failed to create table: {}", e)))
             }
         }
     }
@@ -314,8 +305,9 @@ impl Catalog {
 fn make_reader(
     batch: RecordBatch,
     schema: SchemaRef,
-) -> RecordBatchIterator<std::vec::IntoIter<std::result::Result<RecordBatch, arrow::error::ArrowError>>>
-{
+) -> RecordBatchIterator<
+    std::vec::IntoIter<std::result::Result<RecordBatch, arrow::error::ArrowError>>,
+> {
     RecordBatchIterator::new(vec![Ok(batch)].into_iter(), schema)
 }
 
@@ -323,9 +315,7 @@ fn make_reader(
 fn records_to_batch(records: &[CatalogRecord]) -> Result<RecordBatch> {
     let schema = Arc::new(media_schema());
 
-    let id_arr = StringArray::from(
-        records.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-    );
+    let id_arr = StringArray::from(records.iter().map(|r| r.id.as_str()).collect::<Vec<_>>());
     let file_hash_arr = StringArray::from(
         records
             .iter()
@@ -344,8 +334,7 @@ fn records_to_batch(records: &[CatalogRecord]) -> Result<RecordBatch> {
             .map(|r| r.file_name.as_str())
             .collect::<Vec<_>>(),
     );
-    let file_size_arr =
-        Int64Array::from(records.iter().map(|r| r.file_size).collect::<Vec<_>>());
+    let file_size_arr = Int64Array::from(records.iter().map(|r| r.file_size).collect::<Vec<_>>());
     let file_ext_arr = StringArray::from(
         records
             .iter()
@@ -385,8 +374,7 @@ fn records_to_batch(records: &[CatalogRecord]) -> Result<RecordBatch> {
     // Optional fields
     let width_arr = Int32Array::from(records.iter().map(|r| r.width).collect::<Vec<_>>());
     let height_arr = Int32Array::from(records.iter().map(|r| r.height).collect::<Vec<_>>());
-    let duration_arr =
-        Int64Array::from(records.iter().map(|r| r.duration_ms).collect::<Vec<_>>());
+    let duration_arr = Int64Array::from(records.iter().map(|r| r.duration_ms).collect::<Vec<_>>());
     let fps_arr = Float32Array::from(records.iter().map(|r| r.fps).collect::<Vec<_>>());
     let codec_arr = StringArray::from(
         records
@@ -394,8 +382,7 @@ fn records_to_batch(records: &[CatalogRecord]) -> Result<RecordBatch> {
             .map(|r| r.codec.as_deref())
             .collect::<Vec<_>>(),
     );
-    let bitrate_arr =
-        Int32Array::from(records.iter().map(|r| r.bitrate_kbps).collect::<Vec<_>>());
+    let bitrate_arr = Int32Array::from(records.iter().map(|r| r.bitrate_kbps).collect::<Vec<_>>());
 
     // EXIF
     let exif_make_arr = StringArray::from(
@@ -426,10 +413,13 @@ fn records_to_batch(records: &[CatalogRecord]) -> Result<RecordBatch> {
             .map(|r| r.exif_focal_length_mm)
             .collect::<Vec<_>>(),
     );
-    let exif_iso_arr =
-        Int32Array::from(records.iter().map(|r| r.exif_iso).collect::<Vec<_>>());
-    let exif_orient_arr =
-        Int32Array::from(records.iter().map(|r| r.exif_orientation).collect::<Vec<_>>());
+    let exif_iso_arr = Int32Array::from(records.iter().map(|r| r.exif_iso).collect::<Vec<_>>());
+    let exif_orient_arr = Int32Array::from(
+        records
+            .iter()
+            .map(|r| r.exif_orientation)
+            .collect::<Vec<_>>(),
+    );
 
     // Video frame
     let source_video_arr = StringArray::from(
@@ -438,10 +428,13 @@ fn records_to_batch(records: &[CatalogRecord]) -> Result<RecordBatch> {
             .map(|r| r.source_video_path.as_deref())
             .collect::<Vec<_>>(),
     );
-    let frame_idx_arr =
-        Int32Array::from(records.iter().map(|r| r.frame_index).collect::<Vec<_>>());
-    let frame_ts_arr =
-        Int64Array::from(records.iter().map(|r| r.frame_timestamp_ms).collect::<Vec<_>>());
+    let frame_idx_arr = Int32Array::from(records.iter().map(|r| r.frame_index).collect::<Vec<_>>());
+    let frame_ts_arr = Int64Array::from(
+        records
+            .iter()
+            .map(|r| r.frame_timestamp_ms)
+            .collect::<Vec<_>>(),
+    );
 
     // Timestamps
     let file_created_arr = StringArray::from(
@@ -468,8 +461,7 @@ fn records_to_batch(records: &[CatalogRecord]) -> Result<RecordBatch> {
             .map(|r| r.updated_at.as_str())
             .collect::<Vec<_>>(),
     );
-    let tombstone_arr =
-        BooleanArray::from(records.iter().map(|r| r.tombstone).collect::<Vec<_>>());
+    let tombstone_arr = BooleanArray::from(records.iter().map(|r| r.tombstone).collect::<Vec<_>>());
 
     let batch = RecordBatch::try_new(
         schema,
@@ -535,9 +527,7 @@ fn batch_to_records(batch: &RecordBatch) -> Result<Vec<CatalogRecord>> {
     let embedding_list = embedding_col
         .as_any()
         .downcast_ref::<FixedSizeListArray>()
-        .ok_or_else(|| {
-            CatalogyError::Database("embedding is not FixedSizeList".to_string())
-        })?;
+        .ok_or_else(|| CatalogyError::Database("embedding is not FixedSizeList".to_string()))?;
 
     // Optional columns
     let width_col = get_opt_i32_col(batch, "width");
@@ -590,14 +580,11 @@ fn batch_to_records(batch: &RecordBatch) -> Result<Vec<CatalogRecord>> {
             embedding,
             model_id: model_id_col.value(i).to_string(),
             model_version: model_version_col.value(i).to_string(),
-            width: width_col
-                .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
-            height: height_col
-                .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
+            width: width_col.and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
+            height: height_col.and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
             duration_ms: duration_col
                 .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
-            fps: fps_col
-                .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
+            fps: fps_col.and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
             codec: codec_col.and_then(|c| {
                 if c.is_null(i) {
                     None
@@ -632,12 +619,21 @@ fn batch_to_records(batch: &RecordBatch) -> Result<Vec<CatalogRecord>> {
                 .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
             exif_gps_lon: exif_lon_col
                 .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
-            exif_focal_length_mm: exif_fl_col
-                .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
-            exif_iso: exif_iso_col
-                .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
-            exif_orientation: exif_orient_col
-                .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
+            exif_focal_length_mm: exif_fl_col.and_then(|c| {
+                if c.is_null(i) {
+                    None
+                } else {
+                    Some(c.value(i))
+                }
+            }),
+            exif_iso: exif_iso_col.and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
+            exif_orientation: exif_orient_col.and_then(|c| {
+                if c.is_null(i) {
+                    None
+                } else {
+                    Some(c.value(i))
+                }
+            }),
             source_video_path: source_video_col.and_then(|c| {
                 if c.is_null(i) {
                     None
@@ -647,8 +643,13 @@ fn batch_to_records(batch: &RecordBatch) -> Result<Vec<CatalogRecord>> {
             }),
             frame_index: frame_idx_col
                 .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
-            frame_timestamp_ms: frame_ts_col
-                .and_then(|c| if c.is_null(i) { None } else { Some(c.value(i)) }),
+            frame_timestamp_ms: frame_ts_col.and_then(|c| {
+                if c.is_null(i) {
+                    None
+                } else {
+                    Some(c.value(i))
+                }
+            }),
             file_created: file_created_col.and_then(|c| {
                 if c.is_null(i) {
                     None
@@ -677,24 +678,17 @@ fn get_string_col<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a StringAr
     batch
         .column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<StringArray>())
-        .ok_or_else(|| {
-            CatalogyError::Database(format!("Missing or invalid column: {}", name))
-        })
+        .ok_or_else(|| CatalogyError::Database(format!("Missing or invalid column: {}", name)))
 }
 
 fn get_i64_col<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int64Array> {
     batch
         .column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
-        .ok_or_else(|| {
-            CatalogyError::Database(format!("Missing or invalid column: {}", name))
-        })
+        .ok_or_else(|| CatalogyError::Database(format!("Missing or invalid column: {}", name)))
 }
 
-fn get_opt_string_col<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Option<&'a StringArray> {
+fn get_opt_string_col<'a>(batch: &'a RecordBatch, name: &str) -> Option<&'a StringArray> {
     batch
         .column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<StringArray>())
@@ -712,34 +706,26 @@ fn get_opt_i64_col<'a>(batch: &'a RecordBatch, name: &str) -> Option<&'a Int64Ar
         .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
 }
 
-fn get_opt_f32_col<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Option<&'a Float32Array> {
+fn get_opt_f32_col<'a>(batch: &'a RecordBatch, name: &str) -> Option<&'a Float32Array> {
     batch
         .column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<Float32Array>())
 }
 
-fn get_opt_f64_col<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Option<&'a Float64Array> {
+fn get_opt_f64_col<'a>(batch: &'a RecordBatch, name: &str) -> Option<&'a Float64Array> {
     batch
         .column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
 }
 
 async fn collect_batches(
-    mut stream: impl futures::Stream<
-            Item = std::result::Result<RecordBatch, lancedb::error::Error>,
-        > + Unpin,
+    mut stream: impl futures::Stream<Item = std::result::Result<RecordBatch, lancedb::error::Error>>
+        + Unpin,
 ) -> Result<Vec<RecordBatch>> {
     use futures::StreamExt;
     let mut batches = Vec::new();
     while let Some(result) = stream.next().await {
-        let batch =
-            result.map_err(|e| CatalogyError::Database(format!("Stream error: {}", e)))?;
+        let batch = result.map_err(|e| CatalogyError::Database(format!("Stream error: {}", e)))?;
         batches.push(batch);
     }
     Ok(batches)

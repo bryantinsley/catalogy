@@ -26,10 +26,7 @@ impl EmbedSession {
     ) -> Result<Self> {
         let visual_session = Session::builder()
             .map_err(|e| {
-                CatalogyError::Embedding(format!(
-                    "Failed to create ORT session builder: {}",
-                    e
-                ))
+                CatalogyError::Embedding(format!("Failed to create ORT session builder: {}", e))
             })?
             .with_execution_providers([
                 #[cfg(target_os = "macos")]
@@ -37,10 +34,7 @@ impl EmbedSession {
                 ort::ep::CPU::default().build(),
             ])
             .map_err(|e| {
-                CatalogyError::Embedding(format!(
-                    "Failed to set execution providers: {}",
-                    e
-                ))
+                CatalogyError::Embedding(format!("Failed to set execution providers: {}", e))
             })?
             .commit_from_file(visual_model_path)
             .map_err(|e| {
@@ -53,10 +47,7 @@ impl EmbedSession {
 
         let text_session = Session::builder()
             .map_err(|e| {
-                CatalogyError::Embedding(format!(
-                    "Failed to create ORT session builder: {}",
-                    e
-                ))
+                CatalogyError::Embedding(format!("Failed to create ORT session builder: {}", e))
             })?
             .with_execution_providers([
                 #[cfg(target_os = "macos")]
@@ -64,10 +55,7 @@ impl EmbedSession {
                 ort::ep::CPU::default().build(),
             ])
             .map_err(|e| {
-                CatalogyError::Embedding(format!(
-                    "Failed to set execution providers: {}",
-                    e
-                ))
+                CatalogyError::Embedding(format!("Failed to set execution providers: {}", e))
             })?
             .commit_from_file(text_model_path)
             .map_err(|e| {
@@ -129,14 +117,10 @@ impl EmbedSession {
             let mut text_session = self
                 .text_session
                 .lock()
-                .map_err(|e| {
-                    CatalogyError::Embedding(format!("Session lock poisoned: {}", e))
-                })?;
+                .map_err(|e| CatalogyError::Embedding(format!("Session lock poisoned: {}", e)))?;
             let outputs = text_session
                 .run(ort::inputs![input_tensor])
-                .map_err(|e| {
-                    CatalogyError::Embedding(format!("Text inference failed: {}", e))
-                })?;
+                .map_err(|e| CatalogyError::Embedding(format!("Text inference failed: {}", e)))?;
 
             let output_tensor = outputs[0].try_extract_tensor::<f32>().map_err(|e| {
                 CatalogyError::Embedding(format!("Failed to extract text embedding: {}", e))
@@ -157,30 +141,20 @@ impl EmbedSession {
         let shape: Vec<i64> = input.shape().iter().map(|&d| d as i64).collect();
         let data: Vec<f32> = input.into_raw_vec_and_offset().0;
         let input_tensor = Tensor::from_array((shape, data)).map_err(|e| {
-            CatalogyError::Embedding(format!(
-                "Failed to create visual input tensor: {}",
-                e
-            ))
+            CatalogyError::Embedding(format!("Failed to create visual input tensor: {}", e))
         })?;
 
         let embedding = {
             let mut visual_session = self
                 .visual_session
                 .lock()
-                .map_err(|e| {
-                    CatalogyError::Embedding(format!("Session lock poisoned: {}", e))
-                })?;
+                .map_err(|e| CatalogyError::Embedding(format!("Session lock poisoned: {}", e)))?;
             let outputs = visual_session
                 .run(ort::inputs![input_tensor])
-                .map_err(|e| {
-                    CatalogyError::Embedding(format!("Visual inference failed: {}", e))
-                })?;
+                .map_err(|e| CatalogyError::Embedding(format!("Visual inference failed: {}", e)))?;
 
             let output_tensor = outputs[0].try_extract_tensor::<f32>().map_err(|e| {
-                CatalogyError::Embedding(format!(
-                    "Failed to extract visual embedding: {}",
-                    e
-                ))
+                CatalogyError::Embedding(format!("Failed to extract visual embedding: {}", e))
             })?;
 
             output_tensor.1.to_vec()
@@ -318,8 +292,8 @@ mod tests {
         let embeddings = vec![
             l2_normalize(&vec![1.0, 0.0, 0.0]),
             l2_normalize(&vec![0.99, 0.01, 0.0]), // Very similar to [0]
-            l2_normalize(&vec![0.0, 1.0, 0.0]),    // Different
-            l2_normalize(&vec![0.01, 0.99, 0.0]),  // Very similar to [2]
+            l2_normalize(&vec![0.0, 1.0, 0.0]),   // Different
+            l2_normalize(&vec![0.01, 0.99, 0.0]), // Very similar to [2]
         ];
         let kept = dedup_frames(&embeddings, 0.95);
         assert_eq!(kept.len(), 2);

@@ -50,9 +50,7 @@ pub fn apply_policy(
 
             // Move original to archive
             std::fs::rename(original_path, &archive_path).map_err(|e| {
-                CatalogyError::Transcode(format!(
-                    "failed to move original to archive: {e}"
-                ))
+                CatalogyError::Transcode(format!("failed to move original to archive: {e}"))
             })?;
 
             Ok(PolicyResult {
@@ -67,9 +65,8 @@ pub fn apply_policy(
         "replace" => {
             // Move transcoded to original location (replacing it)
             // First remove the original
-            std::fs::remove_file(original_path).map_err(|e| {
-                CatalogyError::Transcode(format!("failed to remove original: {e}"))
-            })?;
+            std::fs::remove_file(original_path)
+                .map_err(|e| CatalogyError::Transcode(format!("failed to remove original: {e}")))?;
 
             // Move transcoded to original's location
             std::fs::rename(transcoded_path, original_path).or_else(|_| {
@@ -102,9 +99,7 @@ pub fn apply_policy(
 /// e.g., original: /nas/media/videos/clip.mp4, archive_dir: /nas/archive
 /// → /nas/archive/videos/clip.mp4
 fn build_archive_path(original_path: &Path, archive_base: &str) -> PathBuf {
-    let file_name = original_path
-        .file_name()
-        .unwrap_or_default();
+    let file_name = original_path.file_name().unwrap_or_default();
     PathBuf::from(archive_base).join(file_name)
 }
 
@@ -202,10 +197,7 @@ mod tests {
 
     #[test]
     fn test_build_archive_path() {
-        let path = build_archive_path(
-            Path::new("/nas/media/videos/vacation.mp4"),
-            "/nas/archive",
-        );
+        let path = build_archive_path(Path::new("/nas/media/videos/vacation.mp4"), "/nas/archive");
         assert_eq!(path, PathBuf::from("/nas/archive/vacation.mp4"));
     }
 }

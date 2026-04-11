@@ -30,7 +30,10 @@ pub fn run_transcode_dry_run(db: &StateDb, config: &TranscodeConfig) -> Result<V
             (Some(w), Some(h)) => format!("{}x{}", w, h),
             _ => "unknown".to_string(),
         };
-        let codec = metadata.codec.clone().unwrap_or_else(|| "unknown".to_string());
+        let codec = metadata
+            .codec
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
         let decision = should_transcode(metadata, config);
 
         entries.push(DryRunEntry {
@@ -102,8 +105,7 @@ pub fn run_transcode_worker(
                 target_resolution,
                 ..
             } => {
-                let output_path =
-                    staging_output_path(file_path, &config.staging_dir);
+                let output_path = staging_output_path(file_path, &config.staging_dir);
 
                 eprintln!(
                     "  Transcoding {} → {}x{} {} ...",
@@ -117,11 +119,7 @@ pub fn run_transcode_worker(
                 match transcode_video(file_path, &output_path, config) {
                     Ok(result) => {
                         // Verify transcode
-                        let verify = verify_transcode(
-                            file_path,
-                            &output_path,
-                            ffprobe.as_deref(),
-                        )?;
+                        let verify = verify_transcode(file_path, &output_path, ffprobe.as_deref())?;
 
                         if !verify.passed {
                             // Cleanup failed transcode output
@@ -300,10 +298,9 @@ mod tests {
         };
 
         let entries = run_transcode_dry_run(&db, &config).unwrap();
-        assert!(entries.iter().all(|e| matches!(
-            e.decision,
-            TranscodeDecision::Skip { .. }
-        )));
+        assert!(entries
+            .iter()
+            .all(|e| matches!(e.decision, TranscodeDecision::Skip { .. })));
     }
 
     #[test]

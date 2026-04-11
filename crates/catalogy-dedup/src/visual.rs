@@ -303,7 +303,10 @@ mod tests {
         catalog.batch_upsert(&[r1, r2]).unwrap();
 
         let clusters = find_visual_duplicates(&catalog, 0.92).unwrap();
-        assert!(clusters.is_empty(), "Should find no clusters for very different embeddings");
+        assert!(
+            clusters.is_empty(),
+            "Should find no clusters for very different embeddings"
+        );
     }
 
     #[test]
