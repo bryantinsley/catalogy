@@ -600,7 +600,7 @@ pub async fn files_handler(
 
     let total = filtered.len() as u64;
     let page = params.page.max(1);
-    let per_page = params.per_page.min(200).max(1);
+    let per_page = params.per_page.clamp(1, 200);
     let skip = ((page - 1) * per_page) as usize;
 
     let mut sorted = filtered;
@@ -953,7 +953,7 @@ pub async fn browse_handler(
 
     let total = filtered.len() as u64;
     let page = params.page.max(1);
-    let per_page = params.per_page.min(200).max(1);
+    let per_page = params.per_page.clamp(1, 200);
     let skip = ((page - 1) * per_page) as usize;
 
     let mut sorted = filtered;

@@ -73,11 +73,7 @@ pub fn run_transcode_worker(
     let ffprobe = catalogy_metadata::find_ffprobe(None);
 
     // Process transcode jobs
-    loop {
-        let job = match db.claim(JobStage::Transcode, worker_id)? {
-            Some(j) => j,
-            None => break,
-        };
+    while let Some(job) = db.claim(JobStage::Transcode, worker_id)? {
 
         let file_path = &job.file_path;
 

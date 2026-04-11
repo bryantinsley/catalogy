@@ -51,7 +51,7 @@ impl Catalog {
 
     /// Insert or update a single record.
     pub fn upsert(&self, record: &CatalogRecord) -> Result<()> {
-        self.batch_upsert(&[record.clone()])
+        self.batch_upsert(std::slice::from_ref(record))
     }
 
     /// Insert or update a batch of records.

@@ -18,12 +18,7 @@ pub fn run_embed_worker(
 ) -> Result<u64> {
     let mut count = 0u64;
 
-    loop {
-        let job = match db.claim(JobStage::Embed, worker_id)? {
-            Some(j) => j,
-            None => break,
-        };
-
+    while let Some(job) = db.claim(JobStage::Embed, worker_id)? {
         let file_path = &job.file_path;
 
         // Check if file exists
@@ -129,12 +124,7 @@ pub fn run_reembed_worker(
 ) -> Result<u64> {
     let mut count = 0u64;
 
-    loop {
-        let job = match db.claim(JobStage::ReEmbed, worker_id)? {
-            Some(j) => j,
-            None => break,
-        };
-
+    while let Some(job) = db.claim(JobStage::ReEmbed, worker_id)? {
         let file_path = &job.file_path;
 
         // Check if file exists

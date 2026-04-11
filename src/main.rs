@@ -251,18 +251,6 @@ fn make_spinner(msg: &str) -> ProgressBar {
     pb
 }
 
-fn make_progress_bar(total: u64, msg: &str) -> ProgressBar {
-    let pb = ProgressBar::new(total);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "{msg} [{bar:40.cyan/blue}] {pos}/{len} ({per_sec}, ETA {eta})",
-        )
-        .unwrap()
-        .progress_chars("##-"),
-    );
-    pb.set_message(msg.to_string());
-    pb
-}
 
 fn run_scan(scan_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = default_state_db_path();
@@ -935,8 +923,7 @@ fn check_command_version(cmd: &str) -> Option<String> {
             let stdout = String::from_utf8_lossy(&o.stdout);
             stdout.lines().next().and_then(|line| {
                 line.split("version").nth(1).map(|v| {
-                    v.trim()
-                        .split_whitespace()
+                    v.split_whitespace()
                         .next()
                         .unwrap_or("unknown")
                         .to_string()

@@ -5,8 +5,8 @@ use ndarray::Array4;
 use std::path::Path;
 
 /// CLIP image normalization constants
-const CLIP_MEAN: [f32; 3] = [0.48145466, 0.4578275, 0.40821073];
-const CLIP_STD: [f32; 3] = [0.26862954, 0.26130258, 0.27577711];
+const CLIP_MEAN: [f32; 3] = [0.481_455, 0.457_828, 0.408_211];
+const CLIP_STD: [f32; 3] = [0.268_630, 0.261_303, 0.275_777];
 const CLIP_INPUT_SIZE: u32 = 224;
 
 /// Load and preprocess an image for CLIP inference.

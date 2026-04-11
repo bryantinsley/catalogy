@@ -91,8 +91,8 @@ pub fn find_visual_duplicates(
 
     // Build clusters from union-find
     let mut clusters_map: HashMap<usize, Vec<usize>> = HashMap::new();
-    for i in 0..records.len() {
-        if records[i].media_type == "video_frame" {
+    for (i, record) in records.iter().enumerate() {
+        if record.media_type == "video_frame" {
             continue;
         }
         let root = uf.find(i);
