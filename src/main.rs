@@ -602,11 +602,7 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(catalogy_server::AppState {
         catalog,
         search_engine,
-        state_db_path: if db_path.exists() {
-            Some(db_path)
-        } else {
-            None
-        },
+        state_db_path: Some(db_path),
         model_dir: mdir,
         data_dir: default_data_dir(),
         progress: std::sync::Mutex::new(Default::default()),

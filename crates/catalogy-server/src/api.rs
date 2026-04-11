@@ -423,7 +423,11 @@ pub async fn setup_status_handler(
         && state.model_dir.join("text.onnx").exists()
         && state.model_dir.join("tokenizer.json").exists();
 
-    let database = state.state_db_path.is_some();
+    let database = state
+        .state_db_path
+        .as_ref()
+        .map(|p| p.exists())
+        .unwrap_or(false);
 
     let count = state.catalog.count().unwrap_or(0);
     let catalog = CatalogStatus {
