@@ -2,4 +2,4 @@ mod change;
 mod db;
 
 pub use change::{apply_changes_and_enqueue, detect_changes, FileChange, FileChangeKind};
-pub use db::{ModelRecord, StateDb};
+pub use db::{FileRecord, ModelRecord, QueueStats, StateDb};

@@ -190,6 +190,48 @@ impl Catalog {
         })
     }
 
+    /// List records with pagination and optional media type filter.
+    pub fn list(
+        &self,
+        offset: usize,
+        limit: usize,
+        media_type: Option<&str>,
+    ) -> Result<(Vec<CatalogRecord>, u64)> {
+        self.rt.block_on(async {
+            let table = match self.open_table().await {
+                Ok(t) => t,
+                Err(_) => return Ok((Vec::new(), 0)),
+            };
+
+            // Get total count (with filter if specified)
+            let filter = media_type.map(|t| format!("media_type = '{}'", t));
+            let total = table
+                .count_rows(filter.as_deref().map(|f| f.into()))
+                .await
+                .map_err(|e| CatalogyError::Database(format!("Count failed: {}", e)))?
+                as u64;
+
+            // Query with pagination
+            let mut query = table.query();
+            if let Some(ref f) = filter {
+                query = query.only_if(f.clone());
+            }
+            let results = query
+                .offset(offset)
+                .limit(limit)
+                .execute()
+                .await
+                .map_err(|e| CatalogyError::Database(format!("Query failed: {}", e)))?;
+
+            let batches = collect_batches(results).await?;
+            let mut all_records = Vec::new();
+            for batch in &batches {
+                all_records.extend(batch_to_records(batch)?);
+            }
+            Ok((all_records, total))
+        })
+    }
+
     /// Count total records.
     pub fn count(&self) -> Result<u64> {
         self.rt.block_on(async {

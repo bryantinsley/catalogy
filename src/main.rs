@@ -605,6 +605,9 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             None
         },
+        model_dir: mdir,
+        data_dir: default_data_dir(),
+        progress: std::sync::Mutex::new(Default::default()),
     });
 
     let rt = tokio::runtime::Runtime::new()?;
