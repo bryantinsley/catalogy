@@ -21,6 +21,20 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// Run an async block on the internal runtime, handling the case where
+    /// we're already inside a tokio runtime (e.g., called from an axum handler).
+    fn run<F, T>(&self, future: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // We're inside an async runtime — use block_in_place to safely block.
+            tokio::task::block_in_place(|| self.rt.block_on(future))
+        } else {
+            self.rt.block_on(future)
+        }
+    }
+
     /// Open (or create) a catalog at the given path.
     pub fn open(path: &str) -> Result<Self> {
         let rt = tokio::runtime::Runtime::new()
@@ -52,7 +66,7 @@ impl Catalog {
         let batch = records_to_batch(records)?;
         let schema = batch.schema();
 
-        self.rt.block_on(async {
+        self.run(async {
             let table = self.get_or_create_table(&batch).await?;
 
             let reader = make_reader(batch, schema);
@@ -72,7 +86,7 @@ impl Catalog {
 
     /// Get a record by ID.
     pub fn get_by_id(&self, id: &str) -> Result<Option<CatalogRecord>> {
-        self.rt.block_on(async {
+        self.run(async {
             let table = match self.open_table().await {
                 Ok(t) => t,
                 Err(_) => return Ok(None),
@@ -99,7 +113,7 @@ impl Catalog {
 
     /// Get records by file hash.
     pub fn get_by_hash(&self, hash: &str) -> Result<Vec<CatalogRecord>> {
-        self.rt.block_on(async {
+        self.run(async {
             let table = match self.open_table().await {
                 Ok(t) => t,
                 Err(_) => return Ok(Vec::new()),
@@ -128,7 +142,7 @@ impl Catalog {
         query_vector: &[f32],
         limit: usize,
     ) -> Result<Vec<(CatalogRecord, f32)>> {
-        self.rt.block_on(async {
+        self.run(async {
             let table = match self.open_table().await {
                 Ok(t) => t,
                 Err(_) => return Ok(Vec::new()),
@@ -169,7 +183,7 @@ impl Catalog {
 
     /// List all records in the catalog.
     pub fn list_all(&self) -> Result<Vec<CatalogRecord>> {
-        self.rt.block_on(async {
+        self.run(async {
             let table = match self.open_table().await {
                 Ok(t) => t,
                 Err(_) => return Ok(Vec::new()),
@@ -197,7 +211,7 @@ impl Catalog {
         limit: usize,
         media_type: Option<&str>,
     ) -> Result<(Vec<CatalogRecord>, u64)> {
-        self.rt.block_on(async {
+        self.run(async {
             let table = match self.open_table().await {
                 Ok(t) => t,
                 Err(_) => return Ok((Vec::new(), 0)),
@@ -234,7 +248,7 @@ impl Catalog {
 
     /// Count total records.
     pub fn count(&self) -> Result<u64> {
-        self.rt.block_on(async {
+        self.run(async {
             let table = match self.open_table().await {
                 Ok(t) => t,
                 Err(_) => return Ok(0),
@@ -251,7 +265,7 @@ impl Catalog {
 
     /// Build an IVF-PQ index on the embedding column.
     pub fn build_index(&self, num_partitions: u32) -> Result<()> {
-        self.rt.block_on(async {
+        self.run(async {
             let table = self.open_table().await?;
 
             table
