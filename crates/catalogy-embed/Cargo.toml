@@ -7,7 +7,7 @@ edition = "2021"
 catalogy-core = { path = "../catalogy-core" }
 catalogy-catalog = { path = "../catalogy-catalog" }
 catalogy-queue = { path = "../catalogy-queue" }
-ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
+ort = { version = "2.0.0-rc.12", features = ["download-binaries", "copy-dylibs"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 ndarray = "0.16"
 tokenizers = "0.21"
