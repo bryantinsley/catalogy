@@ -25,14 +25,20 @@ async function renderDashboard(outlet) {
       statCard(stats.queue.completed, 'Completed');
 
     document.getElementById('dash-actions').innerHTML = `
-      <button class="btn-primary" onclick="promptScan()">Scan Directory</button>
+      <div class="scan-form">
+        <input type="text" id="scan-path-input" placeholder="Enter directory path..." value="/Volumes/" aria-label="Directory path to scan">
+        <button class="btn-primary" onclick="promptScan()">Scan</button>
+      </div>
       <button class="btn-secondary" onclick="startIngest()">Run Ingest</button>
       <button class="btn-secondary" onclick="location.hash='#/search'">Search</button>`;
 
     if (stats.last_scan) {
       document.getElementById('dash-queue').innerHTML = `
         <div class="section-title">Activity</div>
-        <div class="card"><span style="color:var(--text-muted)">Last scan:</span> ${escapeHtml(stats.last_scan)}</div>`;
+        <div class="card last-scan-card">
+          <div class="last-scan-label">Last Scan</div>
+          <div class="last-scan-path">${escapeHtml(stats.last_scan)}</div>
+        </div>`;
     }
 
     updateProgressUI();
@@ -42,20 +48,23 @@ async function renderDashboard(outlet) {
 }
 
 function promptScan() {
-  const path = prompt('Enter directory path to scan:', '');
-  if (path) {
-    api.scan(path).then(() => {
-      alert('Scan started!');
-      renderPage('dashboard');
-    }).catch(e => alert('Scan failed: ' + e.message));
+  const input = document.getElementById('scan-path-input');
+  const path = input ? input.value.trim() : '';
+  if (!path) {
+    showToast('Please enter a directory path.', 'error');
+    return;
   }
+  api.scan(path).then(() => {
+    showToast('Scan started for ' + path, 'success');
+    renderPage('dashboard');
+  }).catch(e => showToast('Scan failed: ' + e.message, 'error'));
 }
 
 function startIngest() {
   api.ingest(null).then(() => {
-    alert('Ingest started!');
+    showToast('Ingest started!', 'success');
     renderPage('dashboard');
-  }).catch(e => alert('Ingest failed: ' + e.message));
+  }).catch(e => showToast('Ingest failed: ' + e.message, 'error'));
 }
 
 // ── Browse Page ────────────────────────────────────────────

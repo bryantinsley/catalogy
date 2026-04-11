@@ -634,7 +634,79 @@ input:focus, select:focus { border-color: var(--cyan); }
   gap: 12px;
   margin-bottom: 24px;
   flex-wrap: wrap;
+  align-items: center;
 }
+
+/* ── Inline Scan Form ─────────────────────────────────────── */
+.scan-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.scan-form input {
+  min-width: 260px;
+  padding: 8px 12px;
+}
+
+/* ── Last Scan Card ───────────────────────────────────────── */
+.last-scan-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.last-scan-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cyan);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.last-scan-path {
+  font-size: 0.875rem;
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* ── Toast Notifications ──────────────────────────────────── */
+#toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--cyan);
+  border-radius: var(--radius);
+  padding: 12px 20px;
+  font-size: 0.875rem;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateX(40px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  max-width: 380px;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.toast-success { border-left-color: var(--success); }
+.toast-error   { border-left-color: var(--error); }
+.toast-info    { border-left-color: var(--cyan); }
 
 /* ── Mobile hamburger ──────────────────────────────────────── */
 .hamburger {
