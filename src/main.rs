@@ -180,32 +180,11 @@ enum Commands {
         run: bool,
     },
 
-    /// First-time setup: create directories, check dependencies, export models
+    /// Check system readiness and set up required components
     ///
     /// Examples:
     ///   catalogy setup
-    ///   catalogy setup --path ~/Photos --path ~/Videos
-    ///   catalogy setup --from-dir /path/to/models
-    ///   catalogy setup --skip-models
-    Setup {
-        /// Skip model download/export
-        #[arg(long)]
-        skip_models: bool,
-
-        /// Copy models from a directory (for air-gapped setup)
-        #[arg(long)]
-        from_dir: Option<String>,
-
-        /// Directory to scan (can be specified multiple times)
-        #[arg(long)]
-        path: Vec<String>,
-    },
-
-    /// Diagnose issues with your catalogy installation
-    ///
-    /// Examples:
-    ///   catalogy doctor
-    Doctor,
+    Setup,
 }
 
 fn default_data_dir() -> PathBuf {
@@ -925,188 +904,134 @@ target_crf = 28
     Ok(())
 }
 
-fn run_setup(
-    skip_models: bool,
-    from_dir: Option<&str>,
-    paths: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!();
-    println!("  Welcome to Catalogy Setup");
-    println!("  =========================");
-    println!();
-
-    let data_dir = default_data_dir();
-    let config_dir = dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("catalogy");
-    let mdir = model_dir();
-
-    // Step 1: Create directories
-    let spinner = make_spinner("Creating directories...");
-    catalogy_setup::ensure_directories(&data_dir, &config_dir)?;
-    spinner.finish_with_message("Directories ready");
-
-    // Step 2: Check dependencies
-    println!();
-    let status = catalogy_setup::check_dependencies(&mdir, &data_dir);
-
-    println!("  Dependencies:");
-    println!("    {}", status.ffmpeg);
-    println!("    {}", status.ffprobe);
-    println!();
-
-    if !status.ffmpeg.is_ok() || !status.ffprobe.is_ok() {
-        println!("  Install ffmpeg: brew install ffmpeg  (macOS)");
-        println!("                  apt install ffmpeg   (Ubuntu/Debian)");
-        println!();
-    }
-
-    // Step 3: Handle models
-    if skip_models {
-        println!("  Skipping model setup (--skip-models)");
-    } else if let Some(src) = from_dir {
-        let spinner = make_spinner("Copying models from directory...");
-        let src_path = Path::new(src);
-        catalogy_setup::copy_models_from_dir(src_path, &mdir)?;
-        spinner.finish_with_message("Models copied successfully");
-    } else if !status.models_ok() {
-        println!("  Models:");
-        println!("    {}", status.visual_model);
-        println!("    {}", status.text_model);
-        println!("    {}", status.tokenizer);
-        println!();
-
-        // Try Python export
-        if let Some(script) = catalogy_setup::find_export_script() {
-            if status.python.is_ok() {
-                println!("  Found export script and Python with required packages.");
-                println!("  Exporting CLIP models (this may take several minutes)...");
-                println!();
-                let spinner = make_spinner("Exporting CLIP models via Python...");
-                match catalogy_setup::export_models_via_python(&script, &mdir) {
-                    Ok(_) => {
-                        spinner.finish_with_message("Models exported successfully");
-                    }
-                    Err(e) => {
-                        spinner.finish_with_message("Model export failed");
-                        warn!(error = %e, "Model export failed");
-                        println!("  Export failed: {e}");
-                        println!("  You can retry manually: python3 {} --output-dir {}", script.display(), mdir.display());
-                    }
-                }
-            } else {
-                println!("  {}", status.python);
-                println!();
-                println!("  To export models, install Python packages:");
-                println!("    pip install torch open-clip-torch onnx onnxruntime transformers");
-                println!("    python3 {} --output-dir {}", script.display(), mdir.display());
-                println!();
-                println!("  Or copy pre-exported models:");
-                println!("    catalogy setup --from-dir /path/to/models");
-            }
-        } else {
-            println!("  Export script not found. To get models:");
-            println!();
-            println!("  Option A - Python export:");
-            println!("    pip install torch open-clip-torch onnx onnxruntime transformers");
-            println!("    python scripts/export_clip.py --output-dir {}", mdir.display());
-            println!();
-            println!("  Option B - Air-gapped transfer:");
-            println!("    catalogy setup --from-dir /path/to/models");
-        }
-    } else {
-        println!("  Models:");
-        println!("    {}", status.visual_model);
-        println!("    {}", status.text_model);
-        println!("    {}", status.tokenizer);
-    }
-
-    // Step 4: Generate config if paths provided
-    println!();
-    let config_path = default_config_path();
-    if !paths.is_empty() {
-        if config_path.exists() {
-            println!("  Config file already exists at {}", config_path.display());
-            println!("  Skipping config generation (use `catalogy config` to manage).");
-        } else {
-            catalogy_setup::generate_config(&config_path, paths)?;
-            println!("  Generated config at {}", config_path.display());
-            for p in paths {
-                println!("    scan path: {p}");
-            }
-        }
-    } else if !config_path.exists() {
-        println!("  No config file found. Generate one with:");
-        println!("    catalogy setup --path ~/Photos --path ~/Videos");
-        println!("    or: catalogy config --init");
-    }
-
-    // Step 5: Summary
-    println!();
-    let final_status = catalogy_setup::check_dependencies(&mdir, &data_dir);
-    if final_status.all_ok() {
-        println!("  Setup complete! All checks passed.");
-        println!();
-        println!("  Next steps:");
-        println!("    catalogy scan --path ~/Photos");
-        println!("    catalogy ingest");
-        println!("    catalogy search \"sunset at the beach\"");
-    } else {
-        println!("  Setup finished with some items remaining.");
-        println!("  Run `catalogy doctor` to check status.");
-    }
-    println!();
-
-    Ok(())
+fn check_command_version(cmd: &str) -> Option<String> {
+    std::process::Command::new(cmd)
+        .arg("-version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            stdout.lines().next().and_then(|line| {
+                line.split("version")
+                    .nth(1)
+                    .map(|v| v.trim().split_whitespace().next().unwrap_or("unknown").to_string())
+            })
+        })
 }
 
-fn run_doctor() -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = default_data_dir();
+fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Catalogy Setup Check");
+    println!("====================");
+    println!();
+
+    let mut issues = 0u32;
+
+    // --- System Dependencies ---
+    println!("System Dependencies:");
+
+    let ffmpeg_version = check_command_version("ffmpeg");
+    if let Some(ref ver) = ffmpeg_version {
+        println!("  \u{2713} ffmpeg      (version {ver})");
+    } else {
+        println!("  \u{2717} ffmpeg      MISSING \u{2014} run: brew install ffmpeg");
+        issues += 1;
+    }
+
+    let ffprobe_version = check_command_version("ffprobe");
+    if let Some(ref ver) = ffprobe_version {
+        println!("  \u{2713} ffprobe     (version {ver})");
+    } else {
+        println!("  \u{2717} ffprobe     MISSING \u{2014} run: brew install ffmpeg");
+        issues += 1;
+    }
+
+    println!();
+
+    // --- CLIP Model Files ---
     let mdir = model_dir();
+    let home = dirs::home_dir()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mdir_display = mdir.to_string_lossy().replace(&home, "~");
+    println!("CLIP Model Files ({mdir_display}/):");
 
-    let status = catalogy_setup::check_dependencies(&mdir, &data_dir);
-    print!("{}", catalogy_setup::format_doctor_report(&status));
+    let model_files = ["visual.onnx", "text.onnx", "tokenizer.json"];
+    for fname in &model_files {
+        let fpath = mdir.join(fname);
+        if fpath.exists() {
+            println!("  \u{2713} {fname}");
+        } else {
+            println!("  \u{2717} {fname}  MISSING");
+            issues += 1;
+        }
+    }
 
-    // Additional checks: state database
-    let db_path = default_state_db_path();
-    println!("State Database:");
-    if db_path.exists() {
-        match catalogy_queue::StateDb::open(&db_path) {
-            Ok(db) => {
-                let file_count = db.file_count().unwrap_or(0);
-                let stats = db.stats();
-                println!(
-                    "  [ok] {} ({} files tracked)",
-                    db_path.display(),
-                    file_count
-                );
-                if let Ok(s) = stats {
-                    println!(
-                        "  [ok] Queue: {} pending, {} completed, {} failed",
-                        s.pending, s.completed, s.failed
-                    );
-                }
+    println!();
+
+    // --- Create Directories ---
+    println!("Directories:");
+
+    let data_dir = default_data_dir();
+    let models_dir = model_dir();
+    let thumbnails_dir = data_dir.join("thumbnails");
+
+    let dir_items: Vec<(&str, PathBuf)> = vec![
+        ("Data dir", data_dir.clone()),
+        ("Models dir", models_dir),
+        ("Thumbnails dir", thumbnails_dir),
+    ];
+
+    for (label, dir) in &dir_items {
+        match std::fs::create_dir_all(dir) {
+            Ok(_) => {
+                let display = dir.to_string_lossy().replace(&home, "~");
+                println!("  \u{2713} {label} created: {display}/");
             }
             Err(e) => {
-                println!("  [error] Failed to open: {e}");
+                println!("  \u{2717} {label} FAILED: {e}");
+                issues += 1;
             }
         }
-    } else {
-        println!("  [missing] No state database (run `catalogy scan` first)");
     }
 
-    // Config file
     println!();
-    println!("Configuration:");
-    let config_path = default_config_path();
-    if config_path.exists() {
-        println!("  [ok] Config at {}", config_path.display());
+
+    // --- Summary ---
+    let separator = "\u{2550}".repeat(50);
+    println!("{separator}");
+
+    if issues == 0 {
+        println!("\u{2713} All checks passed! You're ready to use catalogy.");
+        println!();
+        println!("Next steps:");
+        println!("  catalogy scan --path ~/Photos");
+        println!("  catalogy ingest");
+        println!("  catalogy serve          # then open http://localhost:8080");
     } else {
         println!(
-            "  [missing] No config file (run `catalogy setup --path ~/Photos` or `catalogy config --init`)"
+            "\u{26a0}  {issues} issue{} found. Fix {} before running ingest.",
+            if issues == 1 { "" } else { "s" },
+            if issues == 1 { "it" } else { "them" },
         );
+
+        let models_missing = model_files.iter().any(|f| !mdir.join(f).exists());
+        if models_missing {
+            println!();
+            println!("To get CLIP models (choose one):");
+            println!();
+            println!("  Option A \u{2014} Python export (recommended):");
+            println!("    pip install torch transformers onnxruntime");
+            println!("    python scripts/export_clip.py");
+            let escaped_mdir = mdir.to_string_lossy().replace(' ', "\\ ");
+            println!("    mv visual.onnx text.onnx tokenizer.json {escaped_mdir}/");
+            println!();
+            println!("  Option B \u{2014} Download pre-exported models:");
+            println!("    See README.md for download links.");
+        }
     }
-    println!();
+
+    println!("{separator}");
 
     Ok(())
 }
@@ -1185,12 +1110,7 @@ fn main() {
         Commands::Serve { port } => run_serve(port),
         Commands::Config { init } => run_config(init),
         Commands::Transcode { dry_run, run } => run_transcode(dry_run, run),
-        Commands::Setup {
-            skip_models,
-            from_dir,
-            path,
-        } => run_setup(skip_models, from_dir.as_deref(), &path),
-        Commands::Doctor => run_doctor(),
+        Commands::Setup => run_setup(),
     };
 
     if let Err(e) = result {
