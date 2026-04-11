@@ -4,316 +4,34 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Catalogy</title>
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  --bg: #0f0f0f;
-  --surface: #1a1a1a;
-  --border: #2a2a2a;
-  --text: #e0e0e0;
-  --text-dim: #888;
-  --accent: #6ea8fe;
-  --accent-hover: #8bb9fe;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-}
-
-header {
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-header h1 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.search-bar {
-  display: flex;
-  flex: 1;
-  min-width: 200px;
-  gap: 0.5rem;
-}
-
-.search-bar input {
-  flex: 1;
-  padding: 0.5rem 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 0.9rem;
-  outline: none;
-}
-
-.search-bar input:focus { border-color: var(--accent); }
-
-.search-bar button {
-  padding: 0.5rem 1rem;
-  background: var(--accent);
-  color: #000;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.search-bar button:hover { background: var(--accent-hover); }
-
-.filters {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.filters select, .filters input[type="date"] {
-  padding: 0.4rem 0.5rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font-size: 0.8rem;
-}
-
-.status-bar {
-  padding: 0.5rem 1.5rem;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 0.75rem;
-  padding: 1rem 1.5rem;
-}
-
-.card {
-  background: var(--surface);
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform 0.15s;
-  border: 1px solid var(--border);
-}
-
-.card:hover { transform: scale(1.02); border-color: var(--accent); }
-
-.card img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  display: block;
-  background: #222;
-}
-
-.card .info {
-  padding: 0.5rem;
-  font-size: 0.75rem;
-}
-
-.card .info .name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 0.2rem;
-}
-
-.card .info .meta {
-  color: var(--text-dim);
-  display: flex;
-  justify-content: space-between;
-}
-
-/* Lightbox */
-.lightbox {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.9);
-  z-index: 100;
-  justify-content: center;
-  align-items: center;
-  flex-direction: column;
-}
-
-.lightbox.active { display: flex; }
-
-.lightbox .close {
-  position: absolute;
-  top: 1rem;
-  right: 1.5rem;
-  font-size: 2rem;
-  color: var(--text);
-  cursor: pointer;
-  background: none;
-  border: none;
-  z-index: 101;
-}
-
-.lightbox img, .lightbox video {
-  max-width: 90vw;
-  max-height: 85vh;
-  border-radius: 8px;
-}
-
-.lightbox .details {
-  margin-top: 1rem;
-  text-align: center;
-  font-size: 0.85rem;
-  color: var(--text-dim);
-}
-
-.empty {
-  text-align: center;
-  padding: 4rem 1rem;
-  color: var(--text-dim);
-  font-size: 1.1rem;
-}
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <button class="hamburger" aria-label="Toggle menu">&#9776;</button>
 
-<header>
-  <h1>Catalogy</h1>
-  <div class="search-bar">
-    <input type="text" id="searchInput" placeholder="Search media... (e.g. sunset over ocean)" autofocus>
-    <button onclick="doSearch()">Search</button>
+  <div class="app-layout">
+    <nav class="sidebar" role="navigation" aria-label="Main navigation">
+      <div class="sidebar-brand">
+        <span class="logo">&#128270;</span> Catalogy
+      </div>
+      <ul class="sidebar-nav">
+        <li><a href="#/" aria-label="Dashboard"><span class="nav-icon">&#9632;</span> Dashboard</a></li>
+        <li><a href="#/browse" aria-label="Browse media"><span class="nav-icon">&#9871;</span> Browse</a></li>
+        <li><a href="#/search" aria-label="Search"><span class="nav-icon">&#128269;</span> Search</a></li>
+        <li><a href="#/duplicates" aria-label="Duplicates"><span class="nav-icon">&#128203;</span> Duplicates</a></li>
+        <li><a href="#/setup" aria-label="Setup"><span class="nav-icon">&#9881;</span> Setup</a></li>
+      </ul>
+    </nav>
+
+    <main class="main-content" id="page-outlet" role="main">
+      <div class="skeleton skeleton-card" style="height:200px;margin:40px 0"></div>
+    </main>
   </div>
-  <div class="filters">
-    <select id="typeFilter">
-      <option value="">All types</option>
-      <option value="image">Images</option>
-      <option value="video">Videos</option>
-    </select>
-    <input type="date" id="afterDate" title="After date">
-    <input type="date" id="beforeDate" title="Before date">
-  </div>
-</header>
 
-<div class="status-bar" id="statusBar">Enter a search query to begin.</div>
+  <div id="lightbox" class="lightbox" onclick="if(event.target===this)closeLightbox()" role="dialog" aria-label="Media viewer"></div>
 
-<div class="grid" id="resultsGrid"></div>
-
-<div class="lightbox" id="lightbox">
-  <button class="close" onclick="closeLightbox()">&times;</button>
-  <div id="lightboxContent"></div>
-  <div class="details" id="lightboxDetails"></div>
-</div>
-
-<script>
-const searchInput = document.getElementById('searchInput');
-const typeFilter = document.getElementById('typeFilter');
-const afterDate = document.getElementById('afterDate');
-const beforeDate = document.getElementById('beforeDate');
-const resultsGrid = document.getElementById('resultsGrid');
-const statusBar = document.getElementById('statusBar');
-const lightbox = document.getElementById('lightbox');
-const lightboxContent = document.getElementById('lightboxContent');
-const lightboxDetails = document.getElementById('lightboxDetails');
-
-searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-
-async function doSearch() {
-  const text = searchInput.value.trim();
-  if (!text) return;
-
-  let q = text;
-  const type_ = typeFilter.value;
-  if (type_) q = `type:${type_} ${q}`;
-  const after = afterDate.value;
-  if (after) q = `after:${after} ${q}`;
-  const before = beforeDate.value;
-  if (before) q = `before:${before} ${q}`;
-
-  statusBar.textContent = 'Searching...';
-  resultsGrid.innerHTML = '';
-
-  try {
-    const res = await fetch('/api/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, limit: 50 })
-    });
-
-    if (!res.ok) {
-      const msg = await res.text();
-      statusBar.textContent = `Error: ${msg}`;
-      return;
-    }
-
-    const results = await res.json();
-    statusBar.textContent = `${results.length} result${results.length !== 1 ? 's' : ''} found`;
-
-    if (results.length === 0) {
-      resultsGrid.innerHTML = '<div class="empty">No results found.</div>';
-      return;
-    }
-
-    results.forEach(r => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.onclick = () => openLightbox(r);
-
-      const dims = (r.width && r.height) ? `${r.width}x${r.height}` : '';
-      const score = (r.score * 100).toFixed(1) + '%';
-
-      card.innerHTML = `
-        <img loading="lazy" src="/api/thumb/${r.id}" alt="${esc(r.file_name)}">
-        <div class="info">
-          <div class="name" title="${esc(r.file_name)}">${esc(r.file_name)}</div>
-          <div class="meta">
-            <span>${r.media_type}</span>
-            <span>${dims}</span>
-            <span>${score}</span>
-          </div>
-        </div>
-      `;
-      resultsGrid.appendChild(card);
-    });
-  } catch (err) {
-    statusBar.textContent = `Error: ${err.message}`;
-  }
-}
-
-function openLightbox(r) {
-  lightbox.classList.add('active');
-  if (r.media_type === 'video') {
-    lightboxContent.innerHTML = `<video controls autoplay src="/api/media/${r.id}"></video>`;
-  } else {
-    lightboxContent.innerHTML = `<img src="/api/media/${r.id}" alt="${esc(r.file_name)}">`;
-  }
-  const dims = (r.width && r.height) ? ` | ${r.width}x${r.height}` : '';
-  const dur = r.duration_ms ? ` | ${(r.duration_ms / 1000).toFixed(1)}s` : '';
-  lightboxDetails.textContent = `${r.file_name} | ${r.media_type}${dims}${dur} | Score: ${(r.score * 100).toFixed(1)}%`;
-}
-
-function closeLightbox() {
-  lightbox.classList.remove('active');
-  lightboxContent.innerHTML = '';
-}
-
-lightbox.addEventListener('click', e => { if (e.target === lightbox) closeLightbox(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
-
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-</script>
+  <script src="/app.js"></script>
+  <script src="/components.js"></script>
+  <script src="/pages.js"></script>
 </body>
 </html>

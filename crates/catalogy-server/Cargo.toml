@@ -10,6 +10,9 @@ catalogy-catalog = { path = "../catalogy-catalog" }
 catalogy-embed = { path = "../catalogy-embed" }
 catalogy-dedup = { path = "../catalogy-dedup" }
 catalogy-queue = { path = "../catalogy-queue" }
+catalogy-scanner = { path = "../catalogy-scanner" }
+catalogy-metadata = { path = "../catalogy-metadata" }
+catalogy-extract = { path = "../catalogy-extract" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +22,8 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 rust-embed = "8"
 mime_guess = "2"
 tokio-util = { version = "0.7", features = ["io"] }
+async-stream = "0.3"
+chrono = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
