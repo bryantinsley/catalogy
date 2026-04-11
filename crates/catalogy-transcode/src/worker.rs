@@ -74,7 +74,6 @@ pub fn run_transcode_worker(
 
     // Process transcode jobs
     while let Some(job) = db.claim(JobStage::Transcode, worker_id)? {
-
         let file_path = &job.file_path;
 
         // Get metadata for this file

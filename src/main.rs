@@ -251,7 +251,6 @@ fn make_spinner(msg: &str) -> ProgressBar {
     pb
 }
 
-
 fn run_scan(scan_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = default_state_db_path();
     let db = catalogy_queue::StateDb::open(&db_path)?;
@@ -922,12 +921,9 @@ fn check_command_version(cmd: &str) -> Option<String> {
         .and_then(|o| {
             let stdout = String::from_utf8_lossy(&o.stdout);
             stdout.lines().next().and_then(|line| {
-                line.split("version").nth(1).map(|v| {
-                    v.split_whitespace()
-                        .next()
-                        .unwrap_or("unknown")
-                        .to_string()
-                })
+                line.split("version")
+                    .nth(1)
+                    .map(|v| v.split_whitespace().next().unwrap_or("unknown").to_string())
             })
         })
 }
