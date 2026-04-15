@@ -21,6 +21,11 @@ impl SearchEngine {
         }
     }
 
+    /// Returns a clone of the shared embed session.
+    pub fn embed_session(&self) -> Arc<EmbedSession> {
+        Arc::clone(&self.embed_session)
+    }
+
     /// Execute a search query and return ranked results.
     pub fn search(&self, query: &SearchQuery) -> Result<Vec<SearchResult>> {
         if query.text.is_empty() && query.filters.media_type.is_none() {

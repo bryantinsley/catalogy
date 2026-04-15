@@ -767,6 +767,7 @@ pub async fn ingest_handler(
     let data_dir = state.data_dir.clone();
     let model_dir = state.model_dir.clone();
     let stages = req.stages.clone();
+    let embed_session = state.search_engine.as_ref().map(|se| se.embed_session());
 
     {
         let mut progress = state.progress.lock().unwrap();
@@ -824,7 +825,7 @@ pub async fn ingest_handler(
                 frame_max_dimension: 512,
                 dedup_similarity_threshold: 0.95,
                 ffprobe_path: None,
-                thumbnail_dir: "~/.local/share/catalogy/thumbs".to_string(),
+                thumbnail_dir: data_dir.join("thumbnails").to_string_lossy().to_string(),
             };
             let _ = catalogy_extract::run_extract_frames_worker(&db, &config, "worker-web");
         }
@@ -835,27 +836,33 @@ pub async fn ingest_handler(
                 progress.stage = Some("embed".to_string());
                 progress.message = "Embedding...".to_string();
             }
-            let visual_model = model_dir.join("visual.onnx");
-            let text_model = model_dir.join("text.onnx");
-            let tokenizer = model_dir.join("tokenizer.json");
-
-            if visual_model.exists() && text_model.exists() && tokenizer.exists() {
-                if let Ok(session) =
+            // Reuse the existing embed session if available, otherwise create a new one
+            let session = embed_session.or_else(|| {
+                let visual_model = model_dir.join("visual.onnx");
+                let text_model = model_dir.join("text.onnx");
+                let tokenizer = model_dir.join("tokenizer.json");
+                if visual_model.exists() && text_model.exists() && tokenizer.exists() {
                     catalogy_embed::EmbedSession::new(&visual_model, &text_model, &tokenizer)
+                        .ok()
+                        .map(std::sync::Arc::new)
+                } else {
+                    None
+                }
+            });
+
+            if let Some(session) = session {
+                let catalog_path = data_dir.join("catalog.lance");
+                if let Ok(catalog) =
+                    catalogy_catalog::Catalog::open(&catalog_path.to_string_lossy())
                 {
-                    let catalog_path = data_dir.join("catalog.lance");
-                    if let Ok(catalog) =
-                        catalogy_catalog::Catalog::open(&catalog_path.to_string_lossy())
-                    {
-                        let _ = catalogy_embed::run_embed_worker(
-                            &db,
-                            &session,
-                            &catalog,
-                            "clip-vit-h-14",
-                            "1",
-                            "worker-web",
-                        );
-                    }
+                    let _ = catalogy_embed::run_embed_worker(
+                        &db,
+                        &session,
+                        &catalog,
+                        "clip-vit-h-14",
+                        "1",
+                        "worker-web",
+                    );
                 }
             }
         }
