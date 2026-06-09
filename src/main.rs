@@ -612,7 +612,16 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     rt.block_on(async {
         let app = catalogy_server::create_router(state);
         let addr = format!("0.0.0.0:{}", port);
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                format!(
+                    "port {port} is already in use — another process is bound to it. \
+                     Stop it, or run with --port <other-port>."
+                )
+            } else {
+                format!("failed to bind {addr}: {e}")
+            }
+        })?;
         info!(port, "Server listening");
         println!("Catalogy server running at http://localhost:{port}");
         println!("Press Ctrl+C to stop.");
