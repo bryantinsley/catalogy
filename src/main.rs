@@ -12,6 +12,19 @@ fn shutdown_requested() -> bool {
     SHUTDOWN.load(Ordering::Relaxed)
 }
 
+/// Completes when a shutdown signal (SIGINT/SIGTERM/SIGHUP) has been received.
+///
+/// The process-wide `ctrlc` handler flips the global `SHUTDOWN` flag for all
+/// of those signals; we poll it here rather than installing a second, competing
+/// signal handler. Used to drive `axum`'s graceful shutdown so `systemctl stop`
+/// (SIGTERM) stops the server cleanly instead of waiting for SIGKILL.
+async fn wait_for_shutdown() {
+    while !shutdown_requested() {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    info!("Shutdown signal received — stopping server gracefully");
+}
+
 #[derive(Parser)]
 #[command(
     name = "catalogy",
@@ -625,7 +638,10 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         info!(port, "Server listening");
         println!("Catalogy server running at http://localhost:{port}");
         println!("Press Ctrl+C to stop.");
-        axum::serve(listener, app).await?;
+        axum::serve(listener, app)
+            .with_graceful_shutdown(wait_for_shutdown())
+            .await?;
+        info!("Server stopped");
         Ok::<(), Box<dyn std::error::Error>>(())
     })?;
 

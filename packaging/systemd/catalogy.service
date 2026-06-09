@@ -1,0 +1,43 @@
+[Unit]
+Description=Catalogy — local-first semantic media search server
+Documentation=https://github.com/bryantinsley/catalogy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+
+# Run as the user that owns the catalogy data dir (~/.local/share/catalogy)
+# and can read your media files. Replace REPLACE_WITH_USER with your login,
+# or create a dedicated 'catalogy' service account.
+User=REPLACE_WITH_USER
+
+# Offline flags + CATALOGY_* config live here.
+# Copy catalogy.env.example to this path and edit it.
+EnvironmentFile=/etc/catalogy/catalogy.env
+
+# Adjust if catalogy is installed elsewhere (e.g. ~/.cargo/bin/catalogy).
+# CATALOGY_PORT is substituted by systemd from the EnvironmentFile above.
+ExecStart=/usr/local/bin/catalogy serve --port ${CATALOGY_PORT}
+
+# catalogy shuts down gracefully on SIGTERM (systemd's default stop signal):
+# the HTTP server drains in-flight requests, then exits. If it ever hangs,
+# systemd escalates to SIGKILL after TimeoutStopSec.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=2
+
+# --- Optional hardening ---------------------------------------------------
+# Safe to enable, but ProtectHome / ProtectSystem can block reading media that
+# lives under /home or other system paths — the server needs read access to
+# originals to serve images/video. Relax these if serving files breaks.
+NoNewPrivileges=true
+PrivateTmp=true
+#ProtectSystem=strict
+#ProtectHome=read-only
+#ReadWritePaths=/home/REPLACE_WITH_USER/.local/share/catalogy
+#ReadOnlyPaths=/path/to/your/media
+
+[Install]
+WantedBy=multi-user.target
