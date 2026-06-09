@@ -1,118 +1,115 @@
 # catalogy
 
-A fully local, offline semantic media search engine for images and video frames. Runs entirely on Apple Silicon (MPS GPU) with no external API calls.
+A local-first, **strictly-offline** semantic media search engine for images and
+video frames. Point it at a folder of media, describe what you're looking for in
+plain text, and get back the most visually similar images and video frames — no
+cloud APIs, no data leaving the machine.
 
-## What it does
+Under the hood: CLIP embeddings (ViT-H-14, 1024-dim) stored in LanceDB and searched
+by cosine/ANN similarity. It runs as a CLI and an HTTP server with a small web UI.
 
-Given a folder of images and videos, catalogy:
-
-1. **Extracts frames** from videos (1 frame every 30 seconds) using OpenCV
-2. **Generates CLIP embeddings** for all images and extracted frames using OpenAI's CLIP model via `open_clip`
-3. **Stores vectors + metadata** in a local LanceDB instance
-4. **Searches semantically** — describe what you're looking for in plain text and get back the most visually similar media
+> **Implementation note.** catalogy is a Rust workspace. An earlier Python prototype
+> has been removed; the only remaining Python is `scripts/export_clip.py`, a one-time
+> CLIP→ONNX exporter. Working on the code? Start with **[AGENTS.md](AGENTS.md)** — the
+> authoritative primer on architecture, conventions, and gotchas.
 
 ## Offline by design
 
-After the initial model weight download, catalogy never makes network requests. All scripts set `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and null out proxy environment variables before any library imports. The CLIP model runs locally on your GPU — no OpenAI, Vertex, or any other cloud API involved.
+After the CLIP weights are exported once (the only step that touches the network),
+catalogy never makes another outbound request. The runtime is pure Rust + local ONNX
+inference — no OpenAI, no Vertex, no hosted vector DB. The model export sets the usual
+`HF_HUB_OFFLINE` / proxy guards.
 
-## Model
+## How it works
 
-The project uses **ViT-H-14** (`laion2b_s32b_b79k` weights) — a large CLIP model with 14px patch size and 1024-dimensional embeddings.
+1. **Scan** a directory — hash files, detect changes, queue work.
+2. **Extract** frames from videos (FFmpeg, adaptive selection) + thumbnails.
+3. **Embed** every image and frame with CLIP (ONNX via `ort`) → 1024-dim vectors.
+4. **Store** vectors + rich metadata (EXIF, codec, dimensions, timestamps) in LanceDB.
+5. **Search** semantically from the CLI or the web UI.
 
-We started with ViT-B-32 (the smallest/fastest CLIP variant), but its 32px patch size was too coarse for fine-grained visual discrimination. It struggled to distinguish attributes like color (e.g., "yellow flower" vs "red flower" returned results within 0.02 similarity of each other). ViT-H-14's finer patch resolution and larger embedding space produce much better separation for attribute-level queries.
+## Install
 
-Other options available via `open_clip` if you want to experiment:
+Requires a stable Rust toolchain and FFmpeg/ffprobe on `PATH`.
 
-| Model | Embedding dim | VRAM | Quality |
+```sh
+cargo build --release
+# binary at ./target/release/catalogy  (or `cargo install --path .`)
+```
+
+### Model weights (one-time)
+
+The server needs `visual.onnx`, `text.onnx`, and `tokenizer.json`. Export them from
+open_clip with the bundled script (downloads weights on first run, then offline):
+
+```sh
+python3 -m venv scripts/.venv && source scripts/.venv/bin/activate
+pip install -r scripts/requirements.txt
+python scripts/export_clip.py --output-dir ~/.local/share/catalogy/models
+```
+
+`catalogy setup` checks dependencies and can run this for you. Point elsewhere with
+`CATALOGY_MODEL_DIR`.
+
+## Usage
+
+```sh
+catalogy scan --path ~/Media        # index a folder, queue jobs
+catalogy ingest                     # run workers: frames -> metadata -> embeddings
+catalogy search "rainy city street" # semantic search (--limit, --type, --after)
+catalogy status                     # queue + catalog stats
+catalogy serve                      # HTTP API + web UI at http://localhost:18080
+```
+
+Other subcommands: `dedup` (exact/visual/cross-video duplicate detection), `reembed`
+(swap embedding models, rebuild the ANN index), `transcode` (video transcode policy),
+`config --init`, `setup`.
+
+Default data lives under `~/.local/share/catalogy/` (`catalog.lance`, `state.db`,
+`models/`).
+
+## Running the server
+
+```sh
+catalogy serve --port 18080
+```
+
+- Default port is **18080** (8080 is avoided — it collides with common dev/proxy
+  setups). Override with `--port`.
+- If the port is taken, catalogy exits with a clear `port NNNN is already in use`
+  message — no panic.
+- It binds `0.0.0.0` (reachable on your LAN). Shuts down gracefully on Ctrl+C and on
+  `SIGTERM`, so it stops cleanly under a process manager.
+
+### As a service (systemd)
+
+`packaging/systemd/` ships a unit template, an env example, and a README covering
+both system-wide and rootless `--user` installs (graceful stop, restart-on-failure,
+boot start). See [`packaging/systemd/README.md`](packaging/systemd/README.md).
+
+## The model
+
+**ViT-H-14** (`laion2b_s32b_b79k`), 1024-dim embeddings — chosen over smaller CLIP
+variants for attribute-level discrimination (e.g. "yellow flower" vs "red flower",
+which coarser ViT-B-32 conflates). Other variants are exportable via `open_clip`;
+changing the model means re-embedding the catalog (different dimensions):
+
+| Model | Dim | VRAM | Quality |
 |---|---|---|---|
-| ViT-B-32 | 512 | ~0.5GB | Good — fast but coarse |
-| ViT-B-16 | 512 | ~0.6GB | Better — good sweet spot |
-| ViT-L-14 | 768 | ~1.5GB | Very good |
-| **ViT-H-14** (current) | 1024 | ~2.5GB | Excellent |
-| ViT-bigG-14 | 1280 | ~5GB | State of the art |
-
-To change models, update `MODEL_NAME` and `PRETRAINED` in `ingest.py`, `search.py`, and `web.py`, then re-run ingestion.
+| ViT-B-32 | 512 | ~0.5 GB | fast but coarse |
+| ViT-B-16 | 512 | ~0.6 GB | good sweet spot |
+| ViT-L-14 | 768 | ~1.5 GB | very good |
+| **ViT-H-14** (current) | 1024 | ~2.5 GB | excellent |
+| ViT-bigG-14 | 1280 | ~5 GB | state of the art |
 
 ## Supported formats
 
 **Video:** `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.m4v`, `.flv`
-
 **Image:** `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.tif`
-
-Anything OpenCV can decode will work. Add extensions to the `VIDEO_EXTENSIONS` / `IMAGE_EXTENSIONS` sets if you need more.
-
-## Setup
-
-```bash
-# Requires Python 3.10+ and Homebrew python recommended
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-The first run of any script that loads the CLIP model will download the weights (~2.5GB for ViT-H-14). This is the only time internet access is needed.
-
-## Usage
-
-Set your paths:
-
-```bash
-export MEDIA_PATH=~/my_media
-export DB_PATH=~/my_db
-```
-
-### 1. Extract frames from videos
-
-```bash
-python extract_frames.py --media-dir "$MEDIA_PATH"
-```
-
-Writes frames to `$MEDIA_PATH/frames/` as JPEGs named `{video_stem}_f{index}_{timestamp}s.jpg`.
-
-### 2. Ingest everything into the vector database
-
-```bash
-python ingest.py --media-dir "$MEDIA_PATH" --db-path "$DB_PATH"
-```
-
-Generates CLIP embeddings on the MPS GPU in batches of 4 (tuned to stay under 6GB total memory). Stores vectors plus metadata (filename, source video, timestamp, media type) in LanceDB.
-
-### 3. Search via CLI
-
-```bash
-python search.py "Chinese countryside" --db-path "$DB_PATH" --top-k 5
-```
-
-Returns ranked results with similarity scores:
-
-```
-Rank  Score     Type          Filename
-----------------------------------------------------------------------
-1     0.2147    image         chinese_countryside_v2.jpg
-2     0.2105    image         chinese_countryside_v1.jpg
-3     0.2057    image         japanese_garden_v2.jpg
-```
-
-### 4. Search via web UI
-
-```bash
-python web.py --db-path "$DB_PATH" --media-dir "$MEDIA_PATH" --port 8765
-```
-
-Opens a dark-themed web interface at `http://localhost:8765` with a search box and inline 200px-wide thumbnails for each result.
-
-## File overview
-
-| File | Purpose |
-|---|---|
-| `extract_frames.py` | OpenCV frame extraction (1 per 30s) |
-| `ingest.py` | CLIP embedding generation + LanceDB storage |
-| `search.py` | CLI semantic search |
-| `web.py` | Web UI with thumbnail results |
-| `generate_samples.py` | Synthetic test data generator (not needed for real use) |
 
 ## Notes
 
-- Filenames are stored as metadata but do **not** influence the embedding. Search is purely visual — a file named `beach.jpg` containing a cat will match "cat" queries.
-- Re-ingestion is required when changing models, since embedding dimensions differ.
-- The batch size in `ingest.py` is set to 4 for ViT-H-14 to keep memory under 6GB. Increase it if using a smaller model.
+- Search is purely visual — filenames are stored as metadata but don't influence
+  embeddings. A file named `beach.jpg` containing a cat matches "cat".
+- Architecture, crate map, build/test details, and the runtime gotchas live in
+  **[AGENTS.md](AGENTS.md)**.
