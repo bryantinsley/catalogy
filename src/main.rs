@@ -134,7 +134,7 @@ enum Commands {
     ///   catalogy serve --port 3000
     Serve {
         /// Port to listen on
-        #[arg(long, default_value = "8080")]
+        #[arg(long, default_value = "18080")]
         port: u16,
     },
 
@@ -1020,7 +1020,7 @@ fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
         println!("Next steps:");
         println!("  catalogy scan --path ~/Photos");
         println!("  catalogy ingest");
-        println!("  catalogy serve          # then open http://localhost:8080");
+        println!("  catalogy serve          # then open http://localhost:18080");
     } else {
         println!(
             "\u{26a0}  {issues} issue{} found. Fix {} before running ingest.",
