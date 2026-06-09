@@ -145,7 +145,7 @@ workers = 4
 hash_algorithm = "sha256"
 
 [server]
-port = 8080
+port = 18080
 host = "127.0.0.1"
 "#;
 
@@ -154,7 +154,7 @@ host = "127.0.0.1"
         let config = Config::parse(TEST_CONFIG).unwrap();
         assert_eq!(config.library.paths, vec!["/Volumes/Media/Photos"]);
         assert_eq!(config.embedding.dimensions, 1024);
-        assert_eq!(config.server.port, 8080);
+        assert_eq!(config.server.port, 18080);
         assert_eq!(config.extraction.frame_strategy, "adaptive");
         assert_eq!(config.ingest.workers, 4);
         // Transcode should use defaults when section is omitted

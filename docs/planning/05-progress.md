@@ -41,7 +41,7 @@ brew install ffmpeg
 catalogy setup          # downloads/exports ONNX models + tokenizer
 
 # 3. Run
-catalogy serve --host 0.0.0.0 --port 8080
+catalogy serve --host 0.0.0.0 --port 18080
 ```
 
 Models are stored in `~/.local/share/catalogy/models/` (not committed).
