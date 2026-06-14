@@ -21,6 +21,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Local-first semantic media search engine"
 
+[features]
+# Enable the ONNX Runtime CUDA execution provider (GPU inference).
+# Off by default so CPU/CI builds don't pull CUDA-enabled ORT binaries.
+# Build with: cargo build --release --features cuda
+cuda = ["catalogy-embed/cuda"]
+
 [dependencies]
 catalogy-core = { path = "crates/catalogy-core" }
 catalogy-scanner = { path = "crates/catalogy-scanner" }

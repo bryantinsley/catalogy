@@ -10,6 +10,40 @@ use crate::text_encoder::ClipTokenizer;
 
 const CLIP_DIMENSIONS: usize = 1024;
 
+/// Build the ONNX Runtime execution-provider list, in priority order.
+///
+/// Controlled by the `CATALOGY_EXECUTION_PROVIDER` env var:
+/// - `cuda` — NVIDIA GPU (requires the `cuda` cargo feature and CUDA + cuDNN
+///   on the loader path, e.g. via `LD_LIBRARY_PATH`); device chosen by
+///   `CATALOGY_CUDA_DEVICE` (default 0, relative to `CUDA_VISIBLE_DEVICES`).
+/// - anything else / unset — CPU (with CoreML ahead of it on macOS).
+///
+/// CPU is always appended as a fallback, so a failed CUDA init still runs.
+fn execution_providers() -> Vec<ort::ep::ExecutionProviderDispatch> {
+    let provider = std::env::var("CATALOGY_EXECUTION_PROVIDER")
+        .unwrap_or_default()
+        .to_lowercase();
+
+    match provider.as_str() {
+        #[cfg(feature = "cuda")]
+        "cuda" => {
+            let device_id = std::env::var("CATALOGY_CUDA_DEVICE")
+                .ok()
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(0);
+            vec![
+                ort::ep::CUDA::default().with_device_id(device_id).build(),
+                ort::ep::CPU::default().build(),
+            ]
+        }
+        _ => vec![
+            #[cfg(target_os = "macos")]
+            ort::ep::CoreML::default().build(),
+            ort::ep::CPU::default().build(),
+        ],
+    }
+}
+
 /// Manages ONNX Runtime sessions for CLIP visual and text encoders.
 pub struct EmbedSession {
     visual_session: Mutex<Session>,
@@ -28,11 +62,7 @@ impl EmbedSession {
             .map_err(|e| {
                 CatalogyError::Embedding(format!("Failed to create ORT session builder: {}", e))
             })?
-            .with_execution_providers([
-                #[cfg(target_os = "macos")]
-                ort::ep::CoreML::default().build(),
-                ort::ep::CPU::default().build(),
-            ])
+            .with_execution_providers(execution_providers())
             .map_err(|e| {
                 CatalogyError::Embedding(format!("Failed to set execution providers: {}", e))
             })?
@@ -49,11 +79,7 @@ impl EmbedSession {
             .map_err(|e| {
                 CatalogyError::Embedding(format!("Failed to create ORT session builder: {}", e))
             })?
-            .with_execution_providers([
-                #[cfg(target_os = "macos")]
-                ort::ep::CoreML::default().build(),
-                ort::ep::CPU::default().build(),
-            ])
+            .with_execution_providers(execution_providers())
             .map_err(|e| {
                 CatalogyError::Embedding(format!("Failed to set execution providers: {}", e))
             })?
