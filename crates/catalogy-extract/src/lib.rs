@@ -7,4 +7,4 @@ pub use extract::{
     ExtractionStrategy, FrameOutput,
 };
 pub use thumbnail::generate_thumbnail;
-pub use worker::{run_extract_frames_worker, ExtractFramesResult};
+pub use worker::{read_frame_metadata, run_extract_frames_worker, ExtractFramesResult};

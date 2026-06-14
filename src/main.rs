@@ -230,6 +230,16 @@ fn catalog_path() -> PathBuf {
     default_data_dir().join("catalog.lance")
 }
 
+/// Expand a leading `~/` to the user's home directory.
+fn expand_home(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(path)
+}
+
 fn open_state_db() -> Result<catalogy_queue::StateDb, Box<dyn std::error::Error>> {
     let db_path = default_state_db_path();
     if !db_path.exists() {
@@ -421,6 +431,9 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
             let catalog = catalogy_catalog::Catalog::open(&catalog_path_str)?;
 
             let pb = make_spinner("Embedding...");
+            // Frames were extracted into config.thumbnail_dir by the frames
+            // stage; the embed worker reads them from the same location.
+            let frames_meta_dir = expand_home(&config.thumbnail_dir);
             let count = catalogy_embed::run_embed_worker(
                 &db,
                 &session,
@@ -428,6 +441,8 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
                 "clip-vit-h-14",
                 "1",
                 "worker-main",
+                &frames_meta_dir,
+                config.dedup_similarity_threshold,
             )?;
             pb.finish_with_message(format!("Processed {count} embed jobs"));
             info!(count, "embed stage complete");

@@ -1,6 +1,7 @@
 use catalogy_catalog::{Catalog, CatalogRecord};
-use catalogy_core::{JobStage, Result};
+use catalogy_core::{CatalogyError, Job, JobStage, Result};
 use catalogy_queue::StateDb;
+use std::path::Path;
 
 #[cfg(test)]
 use crate::session::l2_normalize;
@@ -8,6 +9,13 @@ use crate::session::{dedup_frames, mean_pool, EmbedSession};
 
 /// Run the embed worker loop: claim embed jobs, run inference, write to catalog.
 /// Returns the number of jobs processed.
+///
+/// Images are embedded directly into one `image` catalog row. Videos read their
+/// extracted frames from the metadata sidecar in `frames_meta_dir`, embed each
+/// frame, deduplicate near-identical frames (cosine similarity > `dedup_threshold`),
+/// and write one `video_frame` row per kept frame plus one mean-pooled `video`
+/// row (LLD §3.3 / implementation plan task 4.6).
+#[allow(clippy::too_many_arguments)]
 pub fn run_embed_worker(
     db: &StateDb,
     session: &EmbedSession,
@@ -15,73 +23,41 @@ pub fn run_embed_worker(
     model_id: &str,
     model_version: &str,
     worker_id: &str,
+    frames_meta_dir: &Path,
+    dedup_threshold: f32,
 ) -> Result<u64> {
     let mut count = 0u64;
 
     while let Some(job) = db.claim(JobStage::Embed, worker_id)? {
-        let file_path = &job.file_path;
-
         // Check if file exists
-        if !file_path.exists() {
+        if !job.file_path.exists() {
             db.skip(job.id)?;
             continue;
         }
 
-        match session.embed_image(file_path) {
-            Ok(embedding) => {
-                // Get metadata from state DB if available
-                let file_hash = &job.file_hash.0;
-                let file_name = file_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let file_ext = file_path
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
-                let file_size = std::fs::metadata(file_path)
-                    .map(|m| m.len() as i64)
-                    .unwrap_or(0);
+        let file_ext = job
+            .file_path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
 
-                // Determine media type from file extension
-                let media_type = determine_media_type(&file_ext);
+        let result = if determine_media_type(&file_ext) == "video" {
+            embed_video(
+                session,
+                catalog,
+                &job,
+                &file_ext,
+                model_id,
+                model_version,
+                frames_meta_dir,
+                dedup_threshold,
+            )
+        } else {
+            embed_image_file(session, catalog, &job, &file_ext, model_id, model_version)
+        };
 
-                let record = CatalogRecord {
-                    id: uuid::Uuid::now_v7().to_string(),
-                    file_hash: file_hash.clone(),
-                    file_path: file_path.to_string_lossy().to_string(),
-                    file_name,
-                    file_size,
-                    file_ext,
-                    media_type,
-                    embedding,
-                    model_id: model_id.to_string(),
-                    model_version: model_version.to_string(),
-                    width: None,
-                    height: None,
-                    duration_ms: None,
-                    fps: None,
-                    codec: None,
-                    bitrate_kbps: None,
-                    exif_camera_make: None,
-                    exif_camera_model: None,
-                    exif_date_taken: None,
-                    exif_gps_lat: None,
-                    exif_gps_lon: None,
-                    exif_focal_length_mm: None,
-                    exif_iso: None,
-                    exif_orientation: None,
-                    source_video_path: None,
-                    frame_index: None,
-                    frame_timestamp_ms: None,
-                    file_created: None,
-                    file_modified: None,
-                    indexed_at: chrono::Utc::now().to_rfc3339(),
-                    updated_at: chrono::Utc::now().to_rfc3339(),
-                    tombstone: false,
-                };
-
-                catalog.upsert(&record)?;
+        match result {
+            Ok(()) => {
                 db.complete(job.id)?;
                 count += 1;
             }
@@ -92,6 +68,168 @@ pub fn run_embed_worker(
     }
 
     Ok(count)
+}
+
+/// Embed a single image file into one `image` catalog row.
+fn embed_image_file(
+    session: &EmbedSession,
+    catalog: &Catalog,
+    job: &Job,
+    file_ext: &str,
+    model_id: &str,
+    model_version: &str,
+) -> Result<()> {
+    let embedding = session.embed_image(&job.file_path)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let record = build_record(
+        job,
+        file_ext,
+        model_id,
+        model_version,
+        "image",
+        embedding,
+        None,
+        None,
+        None,
+        &now,
+    );
+    catalog.upsert(&record)
+}
+
+/// Embed all extracted frames of a video, dedup in embedding space, and write
+/// one `video_frame` row per kept frame plus one mean-pooled `video` row.
+#[allow(clippy::too_many_arguments)]
+fn embed_video(
+    session: &EmbedSession,
+    catalog: &Catalog,
+    job: &Job,
+    file_ext: &str,
+    model_id: &str,
+    model_version: &str,
+    frames_meta_dir: &Path,
+    dedup_threshold: f32,
+) -> Result<()> {
+    // Locate the frames extracted by the upstream extract_frames stage.
+    let frames = catalogy_extract::read_frame_metadata(frames_meta_dir, &job.file_hash.0)?;
+    let frames: Vec<_> = frames.into_iter().filter(|f| f.path.exists()).collect();
+    if frames.is_empty() {
+        return Err(CatalogyError::Embedding(format!(
+            "no extracted frames found for video {} — run the frames stage first",
+            job.file_path.display()
+        )));
+    }
+
+    // Embed frames one at a time. The exported CLIP visual model has a fixed
+    // batch dimension of 1, so batched inference (embed_images) is not usable
+    // here. Frames are in frame_index (timestamp) order, which dedup relies on.
+    let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(frames.len());
+    for frame in &frames {
+        embeddings.push(session.embed_image(&frame.path)?);
+    }
+
+    // Drop frames that are near-identical to the previous kept frame.
+    let kept = dedup_frames(&embeddings, dedup_threshold);
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let video_path = job.file_path.to_string_lossy().to_string();
+    let mut records = Vec::with_capacity(kept.len() + 1);
+    let mut kept_embeddings = Vec::with_capacity(kept.len());
+
+    // One row per kept frame ("find the moment").
+    for &i in &kept {
+        let frame = &frames[i];
+        kept_embeddings.push(embeddings[i].clone());
+        records.push(build_record(
+            job,
+            file_ext,
+            model_id,
+            model_version,
+            "video_frame",
+            embeddings[i].clone(),
+            Some(video_path.clone()),
+            Some(frame.frame_index as i32),
+            Some(frame.timestamp_ms as i64),
+            &now,
+        ));
+    }
+
+    // One aggregated row for the video itself ("find the video").
+    let video_embedding = mean_pool(&kept_embeddings);
+    records.push(build_record(
+        job,
+        file_ext,
+        model_id,
+        model_version,
+        "video",
+        video_embedding,
+        None,
+        None,
+        None,
+        &now,
+    ));
+
+    catalog.batch_upsert(&records)
+}
+
+/// Build a `CatalogRecord` for a job, filling the fields shared across image,
+/// video, and video_frame rows. Metadata columns (dimensions, EXIF, codec) are
+/// populated by the metadata stage, not here.
+#[allow(clippy::too_many_arguments)]
+fn build_record(
+    job: &Job,
+    file_ext: &str,
+    model_id: &str,
+    model_version: &str,
+    media_type: &str,
+    embedding: Vec<f32>,
+    source_video_path: Option<String>,
+    frame_index: Option<i32>,
+    frame_timestamp_ms: Option<i64>,
+    now: &str,
+) -> CatalogRecord {
+    let file_name = job
+        .file_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let file_size = std::fs::metadata(&job.file_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+
+    CatalogRecord {
+        id: uuid::Uuid::now_v7().to_string(),
+        file_hash: job.file_hash.0.clone(),
+        file_path: job.file_path.to_string_lossy().to_string(),
+        file_name,
+        file_size,
+        file_ext: file_ext.to_string(),
+        media_type: media_type.to_string(),
+        embedding,
+        model_id: model_id.to_string(),
+        model_version: model_version.to_string(),
+        width: None,
+        height: None,
+        duration_ms: None,
+        fps: None,
+        codec: None,
+        bitrate_kbps: None,
+        exif_camera_make: None,
+        exif_camera_model: None,
+        exif_date_taken: None,
+        exif_gps_lat: None,
+        exif_gps_lon: None,
+        exif_focal_length_mm: None,
+        exif_iso: None,
+        exif_orientation: None,
+        source_video_path,
+        frame_index,
+        frame_timestamp_ms,
+        file_created: None,
+        file_modified: None,
+        indexed_at: now.to_string(),
+        updated_at: now.to_string(),
+        tombstone: false,
+    }
 }
 
 /// After all frames for a video are embedded, deduplicate and aggregate.

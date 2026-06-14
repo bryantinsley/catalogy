@@ -855,6 +855,9 @@ pub async fn ingest_handler(
                 if let Ok(catalog) =
                     catalogy_catalog::Catalog::open(&catalog_path.to_string_lossy())
                 {
+                    // Frames were extracted into <data_dir>/thumbnails by the
+                    // frames stage above; the embed worker reads them from there.
+                    let frames_meta_dir = data_dir.join("thumbnails");
                     let _ = catalogy_embed::run_embed_worker(
                         &db,
                         &session,
@@ -862,6 +865,8 @@ pub async fn ingest_handler(
                         "clip-vit-h-14",
                         "1",
                         "worker-web",
+                        &frames_meta_dir,
+                        0.95,
                     );
                 }
             }
