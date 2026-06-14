@@ -145,9 +145,14 @@ impl Catalog {
                 Err(_) => return Ok(Vec::new()),
             };
 
+            // Use cosine distance explicitly: embeddings are L2-normalized CLIP
+            // vectors, so cosine is the right metric and `_distance` comes back
+            // as cosine distance (1 - cosine_similarity), which callers turn
+            // back into an interpretable similarity score.
             let results = table
                 .vector_search(query_vector)
                 .map_err(|e| CatalogyError::Database(format!("Vector search setup failed: {}", e)))?
+                .distance_type(lancedb::DistanceType::Cosine)
                 .limit(limit)
                 .execute()
                 .await

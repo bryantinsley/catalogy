@@ -40,9 +40,8 @@ pub fn find_visual_duplicates(
 
     let mut uf = UnionFind::new(records.len());
 
-    // For each record, find neighbors above threshold
-    // LanceDB returns _distance (L2 distance). For cosine similarity with normalized vectors,
-    // similarity = 1 - distance/2. We search with a reasonable limit.
+    // For each record, find neighbors above threshold. search_vector returns
+    // cosine distance, so similarity = 1 - distance. Search with a reasonable limit.
     let search_limit = 20;
 
     // Track similarity scores per pair for reporting
@@ -67,10 +66,8 @@ pub fn find_visual_duplicates(
                 continue;
             }
 
-            // Convert L2 distance to cosine similarity for normalized vectors:
-            // cos_sim = 1 - (distance^2 / 2) for unit vectors
-            // LanceDB returns squared L2 distance by default
-            let similarity = 1.0 - distance / 2.0;
+            // search_vector uses cosine distance: cos_sim = 1 - distance.
+            let similarity = 1.0 - distance;
 
             if similarity >= threshold {
                 if let Some(&j) = id_to_idx.get(&neighbor.id) {

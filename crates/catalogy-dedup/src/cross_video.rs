@@ -76,7 +76,8 @@ pub fn find_cross_video_duplicates(
                 continue;
             }
 
-            let similarity = 1.0 - distance / 2.0;
+            // search_vector uses cosine distance: cos_sim = 1 - distance.
+            let similarity = 1.0 - distance;
             if similarity < threshold {
                 continue;
             }

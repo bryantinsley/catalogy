@@ -50,8 +50,9 @@ impl SearchEngine {
         let mut results: Vec<SearchResult> = raw_results
             .into_iter()
             .filter_map(|(record, distance)| {
-                // Convert distance to similarity score (LanceDB returns L2 distance)
-                let score = 1.0 / (1.0 + distance);
+                // search_vector uses cosine distance, so _distance = 1 - cosine
+                // similarity. Report the cosine similarity directly.
+                let score = 1.0 - distance;
 
                 // Apply media_type filter
                 if let Some(ref filter_type) = query.filters.media_type {
