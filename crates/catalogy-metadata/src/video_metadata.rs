@@ -3,16 +3,18 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Find the ffprobe binary. Checks configured path first, then PATH.
+/// Find the ffprobe binary. An explicitly configured path is authoritative
+/// (used if it exists, otherwise `None`); only when no path is configured do we
+/// fall back to discovering ffprobe on `PATH`.
 pub fn find_ffprobe(configured_path: Option<&str>) -> Option<PathBuf> {
+    // A configured-but-missing path returns None so the caller can warn, rather
+    // than silently substituting a different ffprobe found on PATH.
     if let Some(path) = configured_path {
         let p = PathBuf::from(path);
-        if p.exists() {
-            return Some(p);
-        }
+        return p.exists().then_some(p);
     }
 
-    // Try to find ffprobe on PATH
+    // No path configured — try to find ffprobe on PATH
     Command::new("which")
         .arg("ffprobe")
         .output()
