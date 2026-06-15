@@ -42,11 +42,15 @@ impl SearchEngine {
             self.embed_session.embed_text(&query.text)?
         };
 
-        // Step 2: Vector search in catalog (fetch extra to allow for post-filtering)
-        let fetch_limit = query.limit * 4;
+        // Step 2: Vector search in catalog. Fetch generously: a single video can
+        // occupy many of the top rows (its aggregated row + each kept frame), and
+        // they all collapse to one result below, so we need headroom to still
+        // return `limit` distinct media items.
+        let fetch_limit = (query.limit * 8).max(80);
         let raw_results = self.catalog.search_vector(&query_vector, fetch_limit)?;
 
-        // Step 3: Post-filter and map to SearchResult
+        // Step 3: Post-filter and map to SearchResult (one row per catalog record;
+        // collapsed to one per media item in step 4).
         let mut results: Vec<SearchResult> = raw_results
             .into_iter()
             .filter_map(|(record, distance)| {
@@ -54,10 +58,15 @@ impl SearchEngine {
                 // similarity. Report the cosine similarity directly.
                 let score = 1.0 - distance;
 
-                // Apply media_type filter
+                // Apply media_type filter. A `video` filter matches both the
+                // aggregated video row and its individual frame rows, so the
+                // collapsed result keeps its best-matching frame timestamp.
                 if let Some(ref filter_type) = query.filters.media_type {
                     let record_type = parse_media_type(&record.media_type);
-                    if record_type != *filter_type {
+                    let matches = record_type == *filter_type
+                        || (*filter_type == MediaType::Video
+                            && record_type == MediaType::VideoFrame);
+                    if !matches {
                         return None;
                     }
                 }
@@ -96,18 +105,75 @@ impl SearchEngine {
 
                 Some(record_to_search_result(record, score))
             })
-            .take(query.limit)
             .collect();
 
-        // Sort by score descending
+        // Step 4: Collapse to one result per media item. A video and all of its
+        // frame rows become a single result whose score is the best across them
+        // and whose frame_info points at the best-matching moment. Then sort by
+        // score and trim to the requested limit.
+        results = collapse_by_media_item(results);
         results.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+        results.truncate(query.limit);
 
         Ok(results)
     }
+}
+
+/// Collapse multiple catalog rows for the same media item into one result.
+///
+/// Videos produce one aggregated `video` row plus one `video_frame` row per kept
+/// frame, all sharing the same `file_path`. Returning them separately floods the
+/// results with near-duplicates, so we keep a single result per `file_path`: the
+/// highest-scoring row as the representative, with `frame_info` set to the
+/// best-scoring frame (the moment to jump to). Images have a unique `file_path`
+/// and pass through unchanged.
+fn collapse_by_media_item(results: Vec<SearchResult>) -> Vec<SearchResult> {
+    use std::collections::HashMap;
+
+    let mut order: Vec<String> = Vec::new();
+    let mut best: HashMap<String, SearchResult> = HashMap::new();
+    let mut best_frame: HashMap<String, (f32, FrameInfo)> = HashMap::new();
+
+    for r in results {
+        let key = r.file_path.to_string_lossy().to_string();
+
+        // Track the best-scoring frame for this item (the "moment").
+        if let Some(fi) = &r.frame_info {
+            let is_better = best_frame.get(&key).is_none_or(|(s, _)| r.score > *s);
+            if is_better {
+                best_frame.insert(key.clone(), (r.score, fi.clone()));
+            }
+        }
+
+        // Track the representative (highest-scoring) row for this item.
+        match best.get(&key) {
+            Some(existing) if existing.score >= r.score => {}
+            _ => {
+                if !best.contains_key(&key) {
+                    order.push(key.clone());
+                }
+                best.insert(key, r);
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .filter_map(|k| {
+            let mut rep = best.remove(&k)?;
+            // If this item has any frames, present it as a single video result
+            // anchored to its best-matching moment.
+            if let Some((_, fi)) = best_frame.remove(&k) {
+                rep.media_type = MediaType::Video;
+                rep.frame_info = Some(fi);
+            }
+            Some(rep)
+        })
+        .collect()
 }
 
 fn parse_media_type(s: &str) -> MediaType {

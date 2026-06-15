@@ -37,6 +37,9 @@ pub struct SearchResultItem {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
+    /// For video results: timestamp (ms) of the best-matching frame — the
+    /// moment to seek to. None for images.
+    pub timestamp_ms: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -267,6 +270,7 @@ pub async fn search_handler(
             width: r.metadata.width,
             height: r.metadata.height,
             duration_ms: r.metadata.duration_ms,
+            timestamp_ms: r.frame_info.as_ref().map(|fi| fi.timestamp_ms),
         })
         .collect();
 
