@@ -1041,6 +1041,7 @@ mod tests {
             width: Some(1920),
             height: Some(1080),
             duration_ms: None,
+            timestamp_ms: None,
         };
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("sunset.jpg"));
