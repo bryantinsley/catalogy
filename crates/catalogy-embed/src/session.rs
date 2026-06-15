@@ -104,10 +104,17 @@ impl EmbedSession {
     /// Embed a single image from file path.
     pub fn embed_image(&self, image_path: &Path) -> Result<Vec<f32>> {
         let input = image_encoder::preprocess_image(image_path)?;
-        self.run_visual_inference(input)
+        let flat = self.run_visual_inference(input)?;
+        Ok(l2_normalize(&flat))
     }
 
-    /// Embed a batch of images from file paths.
+    /// Embed a batch of images from file paths in a single inference call.
+    ///
+    /// Requires a visual model with a dynamic batch axis (see
+    /// `scripts/reexport_visual_dynamic.py`). Each image's embedding is
+    /// L2-normalized independently — the raw model output is one row per image,
+    /// so normalization must be applied per row, not over the concatenated
+    /// buffer.
     pub fn embed_images(&self, image_paths: &[PathBuf]) -> Result<Vec<Vec<f32>>> {
         if image_paths.is_empty() {
             return Ok(Vec::new());
@@ -117,13 +124,25 @@ impl EmbedSession {
         let batch_size = image_paths.len();
         let flat = self.run_visual_inference(input)?;
 
-        // Split flat vector into per-image vectors
+        // Split the flat [batch_size * dim] output into per-image rows and
+        // L2-normalize each independently.
         let dim = self.dimensions();
+        if flat.len() != batch_size * dim {
+            return Err(CatalogyError::Embedding(format!(
+                "visual model returned {} values for a batch of {} (expected {} = {}*{}); \
+                 the model likely lacks a dynamic batch axis",
+                flat.len(),
+                batch_size,
+                batch_size * dim,
+                batch_size,
+                dim
+            )));
+        }
         let mut results = Vec::with_capacity(batch_size);
         for i in 0..batch_size {
             let start = i * dim;
             let end = start + dim;
-            results.push(flat[start..end].to_vec());
+            results.push(l2_normalize(&flat[start..end]));
         }
         Ok(results)
     }
@@ -162,6 +181,8 @@ impl EmbedSession {
         CLIP_DIMENSIONS
     }
 
+    /// Run the visual model and return the raw (un-normalized) output buffer of
+    /// `batch_size * dim` floats. Callers split into rows and L2-normalize each.
     fn run_visual_inference(&self, input: Array4<f32>) -> Result<Vec<f32>> {
         // Convert ndarray to owned data for Tensor::from_array
         let shape: Vec<i64> = input.shape().iter().map(|&d| d as i64).collect();
@@ -185,7 +206,7 @@ impl EmbedSession {
 
             output_tensor.1.to_vec()
         };
-        Ok(l2_normalize(&embedding))
+        Ok(embedding)
     }
 }
 
@@ -383,6 +404,52 @@ mod tests {
         // Should be L2-normalized
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_embed_images_batch_matches_singles() {
+        let Some((visual, text, tokenizer)) = skip_if_no_models() else {
+            eprintln!("Skipping: CATALOGY_MODEL_DIR not set or model files missing");
+            return;
+        };
+
+        let session = EmbedSession::new(&visual, &text, &tokenizer).unwrap();
+
+        // Three visually distinct test images.
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = Vec::new();
+        for (k, tint) in [16u8, 96, 200].into_iter().enumerate() {
+            let p = dir.path().join(format!("img{k}.png"));
+            let img = image::ImageBuffer::from_fn(256, 256, |x, y| {
+                image::Rgb([(x % 256) as u8, (y % 256) as u8, tint])
+            });
+            image::DynamicImage::ImageRgb8(img).save(&p).unwrap();
+            paths.push(p);
+        }
+
+        // Batched inference must require the dynamic-batch visual model.
+        let batched = session.embed_images(&paths).unwrap();
+        assert_eq!(batched.len(), paths.len());
+
+        for (i, p) in paths.iter().enumerate() {
+            // Each row is independently L2-normalized.
+            let norm: f32 = batched[i].iter().map(|x| x * x).sum::<f32>().sqrt();
+            assert!((norm - 1.0).abs() < 1e-3, "row {i} not normalized: {norm}");
+
+            // And must match the single-image path element-for-element, proving
+            // the batch split assigns the right row to the right image.
+            let single = session.embed_image(p).unwrap();
+            let diff = batched[i]
+                .iter()
+                .zip(&single)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(diff < 1e-3, "batch row {i} diverges from single embed: {diff}");
+        }
+
+        // Distinct images must yield distinct embeddings (no row duplication).
+        let sim01 = cosine_similarity(&batched[0], &batched[1]);
+        assert!(sim01 < 0.999, "rows 0 and 1 unexpectedly identical: {sim01}");
     }
 
     #[test]

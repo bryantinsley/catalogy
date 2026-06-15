@@ -119,12 +119,14 @@ fn embed_video(
         )));
     }
 
-    // Embed frames one at a time. The exported CLIP visual model has a fixed
-    // batch dimension of 1, so batched inference (embed_images) is not usable
-    // here. Frames are in frame_index (timestamp) order, which dedup relies on.
+    // Embed frames in batches. The visual model has a dynamic batch axis
+    // (re-exported via scripts/reexport_visual_dynamic.py), so batched inference
+    // amortizes per-call overhead and saturates the GPU. Frames stay in
+    // frame_index (timestamp) order, which dedup relies on.
+    let frame_paths: Vec<_> = frames.iter().map(|f| f.path.clone()).collect();
     let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(frames.len());
-    for frame in &frames {
-        embeddings.push(session.embed_image(&frame.path)?);
+    for chunk in frame_paths.chunks(embed_batch_size()) {
+        embeddings.extend(session.embed_images(chunk)?);
     }
 
     // Drop frames that are near-identical to the previous kept frame.
@@ -301,6 +303,18 @@ pub fn run_reembed_worker(
     }
 
     Ok(count)
+}
+
+/// Number of frames embedded per visual-inference call. Larger batches better
+/// saturate the GPU at the cost of more memory. Override with
+/// `CATALOGY_EMBED_BATCH_SIZE`; defaults to 16, which fits comfortably alongside
+/// the ~5 GB model on a 24 GB card.
+fn embed_batch_size() -> usize {
+    std::env::var("CATALOGY_EMBED_BATCH_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or(16)
 }
 
 fn determine_media_type(ext: &str) -> String {

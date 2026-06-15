@@ -84,6 +84,36 @@
   Not committed to the repo: the env file and the provider-lib copy are
   machine-local. The code changes (Cargo.toml ×2, session.rs) are committed.
 
-- **Still open:** fixed-batch-1 visual.onnx (re-export for batching, now extra
-  worthwhile on GPU); ANN index (Phase 4.7); API `media_type` filter also
+- **Still open:** ANN index (Phase 4.7); API `media_type` filter also
   returns `video_frame` rows; reembed worker video gap (Phase 6).
+
+## Session 2026-06-15 — dynamic-batch visual model + batched embedding
+
+- **Re-exported `visual.onnx` with a real dynamic batch axis.** The deployed
+  model accepted a dynamic batch on its *input* but an internal
+  `reshape(seq, dim)` (`gemm_input_reshape`) had its batch dim baked to 1 by the
+  classic TorchScript tracer's constant folding — so `image_features` was fixed
+  at `[1, 1024]` and any batch>1 failed (`{257,2,1280}` → `{257,1280}`).
+  `scripts/reexport_visual_dynamic.py` re-exports the visual encoder with
+  torch's **dynamo exporter** (`torch.export.Dim` symbolic batch), which
+  preserves the dynamic dim through internal reshapes. Output is now
+  `['batch', 1024]`; validated batch 1/2/8 against PyTorch (max diff ~1e-5).
+  Offline-safe — laion2b weights are cached, `HF_HUB_OFFLINE=1`. The 2.5 GB
+  external-data layout (`visual.onnx` + `visual.onnx.data`) is unchanged; old
+  model backed up to `~/.local/share/catalogy/models/.backup-batch1/`.
+
+- **Fixed a latent batch-normalization bug.** `run_visual_inference`
+  L2-normalized the *entire concatenated batch buffer* as one vector — correct
+  for batch=1, wrong for batch>1. Moved normalization to the per-row call sites:
+  `run_visual_inference` now returns the raw `batch*dim` buffer, `embed_image`
+  normalizes its single row, and `embed_images` splits into rows and normalizes
+  each independently (with a length guard that flags a non-dynamic model). New
+  gated integration test `test_embed_images_batch_matches_singles` proves
+  batched rows match single-image embeds element-for-element and stay distinct.
+
+- **Worker now batches video frames.** `embed_video` replaced its one-frame-at-a
+  -time loop with chunked `embed_images` calls; chunk size is
+  `CATALOGY_EMBED_BATCH_SIZE` (default 16). Deployed: rebuilt `--features cuda`,
+  copied binary + ORT provider libs to `~/.cargo/bin`, added the batch-size knob
+  to the systemd env file. Verified end-to-end on the 3090 (GPU-resident
+  ~5.4 GB, no Reshape errors, correct cosine search).
