@@ -117,3 +117,33 @@
   copied binary + ORT provider libs to `~/.cargo/bin`, added the batch-size knob
   to the systemd env file. Verified end-to-end on the 3090 (GPU-resident
   ~5.4 GB, no Reshape errors, correct cosine search).
+
+## Session 2026-06-15 (cont.) — Phase 4.7 ANN index
+
+- **Completed Phase 4.7 — build ANN index.** Added `catalogy ingest
+  --build-index` plus an automatic build after a full ingest that embedded new
+  rows. Logic lives in `build_catalog_index()` (shared with `reembed
+  --rebuild-index`), guarded by `MIN_INDEX_ROWS = 1000`: below that, brute-force
+  is already exact/fast and IVF-PQ can't train, so it's skipped with an
+  explanation. Partitions sized to ~sqrt(rows).
+
+- **Two correctness fixes found while validating the index:**
+  1. `build_index` trained for **L2** (the `IvfPqIndexBuilder` default) while
+     `search_vector` queries with **cosine** — a metric mismatch. Now builds
+     with `DistanceType::Cosine`.
+  2. IVF-PQ quantizes vectors, so an exact match read ~0.94 cosine instead of
+     ~1.0 — which would distort displayed scores and break the dedup thresholds
+     (0.95/0.92). `search_vector` now sets `refine_factor(10)` (re-rank top
+     candidates with full-precision vectors → exact scores) and `nprobes(20)`
+     (recall); both are no-ops on a brute-force scan. New test builds an index
+     over 600 synthetic rows and asserts the planted neighbor reports ~0 cosine
+     distance after refinement.
+
+- **Known pre-existing failure (not mine):**
+  `catalogy-metadata::video_metadata::tests::test_find_ffprobe_nonexistent_path`
+  fails on any machine with ffprobe on PATH (the test assumes no fallback).
+  Unrelated to this work; flagged for a separate fix.
+
+- **Backlog (refine when tested at scale):** smarter intra-video frame
+  collapsing (distinct moments vs. near-duplicate frames), search pagination,
+  and the fixed `fetch_limit` recall ceiling in the search engine.
