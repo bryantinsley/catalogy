@@ -63,10 +63,7 @@ impl SearchEngine {
                 // collapsed result keeps its best-matching frame timestamp.
                 if let Some(ref filter_type) = query.filters.media_type {
                     let record_type = parse_media_type(&record.media_type);
-                    let matches = record_type == *filter_type
-                        || (*filter_type == MediaType::Video
-                            && record_type == MediaType::VideoFrame);
-                    if !matches {
+                    if !media_type_matches(filter_type, &record_type) {
                         return None;
                     }
                 }
@@ -131,6 +128,17 @@ impl SearchEngine {
 /// highest-scoring row as the representative, with `frame_info` set to the
 /// best-scoring frame (the moment to jump to). Images have a unique `file_path`
 /// and pass through unchanged.
+/// Whether a catalog row of `record_type` satisfies a `filter_type` request.
+///
+/// A `Video` filter intentionally also matches `VideoFrame` rows: frames are how
+/// a video earns its rank, and they collapse into the single video result. All
+/// other types match exactly. `VideoFrame` is an internal storage type, never a
+/// user-facing filter, so it isn't widened in reverse.
+fn media_type_matches(filter_type: &MediaType, record_type: &MediaType) -> bool {
+    record_type == filter_type
+        || (*filter_type == MediaType::Video && *record_type == MediaType::VideoFrame)
+}
+
 fn collapse_by_media_item(results: Vec<SearchResult>) -> Vec<SearchResult> {
     use std::collections::HashMap;
 
@@ -280,5 +288,60 @@ mod tests {
     #[test]
     fn test_collapse_empty() {
         assert!(collapse_by_media_item(vec![]).is_empty());
+    }
+
+    #[test]
+    fn test_media_type_matches() {
+        // Exact matches.
+        assert!(media_type_matches(&MediaType::Image, &MediaType::Image));
+        assert!(media_type_matches(&MediaType::Video, &MediaType::Video));
+        // A video filter also matches the internal frame rows...
+        assert!(media_type_matches(&MediaType::Video, &MediaType::VideoFrame));
+        // ...but an image filter never does, and the widening is one-way.
+        assert!(!media_type_matches(&MediaType::Image, &MediaType::VideoFrame));
+        assert!(!media_type_matches(&MediaType::Image, &MediaType::Video));
+        assert!(!media_type_matches(&MediaType::VideoFrame, &MediaType::Video));
+    }
+
+    #[test]
+    fn test_collapse_multiple_videos_independent() {
+        // Two videos interleaved; each must collapse to its own best moment.
+        let input = vec![
+            sr("/v/a.mp4", MediaType::VideoFrame, 0.30, Some(1000)),
+            sr("/v/b.mp4", MediaType::VideoFrame, 0.70, Some(2000)), // b best
+            sr("/v/a.mp4", MediaType::VideoFrame, 0.55, Some(4000)), // a best
+            sr("/v/b.mp4", MediaType::Video, 0.10, None),
+        ];
+        let out = collapse_by_media_item(input);
+        assert_eq!(out.len(), 2);
+
+        let a = out.iter().find(|r| r.file_name == "a.mp4").unwrap();
+        assert!((a.score - 0.55).abs() < 1e-6);
+        assert_eq!(a.frame_info.as_ref().unwrap().timestamp_ms, 4000);
+
+        let b = out.iter().find(|r| r.file_name == "b.mp4").unwrap();
+        assert!((b.score - 0.70).abs() < 1e-6);
+        assert_eq!(b.frame_info.as_ref().unwrap().timestamp_ms, 2000);
+    }
+
+    #[test]
+    fn test_collapse_aggregated_row_outscores_frames() {
+        // The aggregated `video` row is the highest scorer, but the result must
+        // still be anchored to the best *frame* moment (the aggregated row has
+        // no timestamp to seek to).
+        let input = vec![
+            sr("/v/a.mp4", MediaType::Video, 0.90, None), // top score, no moment
+            sr("/v/a.mp4", MediaType::VideoFrame, 0.40, Some(5000)),
+            sr("/v/a.mp4", MediaType::VideoFrame, 0.60, Some(7000)), // best frame
+        ];
+        let out = collapse_by_media_item(input);
+        assert_eq!(out.len(), 1);
+        assert!((out[0].score - 0.90).abs() < 1e-6, "keeps best overall score");
+        assert_eq!(out[0].media_type, MediaType::Video);
+        assert_eq!(
+            out[0].frame_info.as_ref().unwrap().timestamp_ms,
+            7000,
+            "anchored to best frame, not the score-less aggregated row"
+        );
     }
 }
