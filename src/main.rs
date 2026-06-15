@@ -60,6 +60,12 @@ enum Commands {
         /// Only process specific stages (comma-separated: metadata, frames, embed)
         #[arg(long)]
         stages: Option<String>,
+
+        /// Build the ANN (IVF-PQ) search index after ingest completes. Without
+        /// this flag the index is rebuilt automatically after a full ingest once
+        /// the catalog is large enough for it to help.
+        #[arg(long)]
+        build_index: bool,
     },
 
     /// Search the media catalog using natural language
@@ -367,9 +373,53 @@ fn should_run_stage(stages: Option<&str>, stage_name: &str) -> bool {
     }
 }
 
-fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+/// Below this row count, brute-force (flat) search is already exact and fast,
+/// and IVF-PQ has too little data to train meaningful partitions/codebooks —
+/// so we don't build an index.
+const MIN_INDEX_ROWS: u64 = 1000;
+
+/// Build the IVF-PQ index over the catalog, sizing partitions to the row count.
+///
+/// `force` is set by an explicit `--build-index` / `--rebuild-index` request:
+/// it makes the skip cases print why nothing happened. Automatic post-ingest
+/// builds pass `force = false` and stay quiet when there's nothing useful to do.
+fn build_catalog_index(force: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let catalog_path_str = catalog_path().to_string_lossy().to_string();
+    let catalog = catalogy_catalog::Catalog::open(&catalog_path_str)?;
+
+    let count = catalog.count()?;
+    if count == 0 {
+        if force {
+            println!("Catalog is empty. Nothing to index.");
+        }
+        return Ok(());
+    }
+    if count < MIN_INDEX_ROWS {
+        if force {
+            println!(
+                "Catalog has {count} rows (< {MIN_INDEX_ROWS}); brute-force search is already \
+                 exact and fast at this size — skipping ANN index."
+            );
+        }
+        return Ok(());
+    }
+
+    // LanceDB recommends ~sqrt(rows) IVF partitions.
+    let num_partitions = std::cmp::max(1, (count as f64).sqrt() as u32);
+    info!(rows = count, partitions = num_partitions, "Building ANN index");
+    let pb = make_spinner("Building ANN index...");
+    catalog.build_index(num_partitions)?;
+    pb.finish_with_message(format!("ANN index built ({count} rows, {num_partitions} partitions)"));
+    Ok(())
+}
+
+fn run_ingest(
+    stages: Option<&str>,
+    build_index: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let db = open_state_db()?;
     let config = default_extraction_config();
+    let mut embedded = 0u64;
 
     // Recover any stale running jobs from previous crash/shutdown
     let reset = db.reset_running_to_pending()?;
@@ -446,6 +496,7 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
             )?;
             pb.finish_with_message(format!("Processed {count} embed jobs"));
             info!(count, "embed stage complete");
+            embedded = count;
         }
     }
 
@@ -455,6 +506,17 @@ fn run_ingest(stages: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         if drained > 0 {
             info!(count = drained, "Drained in-progress jobs back to pending");
         }
+        // Don't (re)build an index on a half-finished ingest.
+        return Ok(());
+    }
+
+    // Build the ANN index when explicitly asked, or automatically after a full
+    // ingest that embedded new rows (the spec's "automatic after ingest
+    // completes"). Skipped when only a subset of stages ran, since the catalog
+    // may not reflect a complete pass.
+    let full_ingest = stages.is_none();
+    if build_index || (full_ingest && embedded > 0) {
+        build_catalog_index(build_index)?;
     }
 
     Ok(())
@@ -695,24 +757,7 @@ fn run_reembed(
     }
 
     if rebuild_index {
-        let catalog_path_str = catalog_path().to_string_lossy().to_string();
-        let catalog = catalogy_catalog::Catalog::open(&catalog_path_str)?;
-
-        let count = catalog.count()?;
-        if count == 0 {
-            println!("Catalog is empty. Nothing to index.");
-            return Ok(());
-        }
-
-        let num_partitions = std::cmp::max(1, (count as f64).sqrt() as u32);
-        info!(
-            rows = count,
-            partitions = num_partitions,
-            "Rebuilding ANN index"
-        );
-        let pb = make_spinner("Rebuilding ANN index...");
-        catalog.build_index(num_partitions)?;
-        pb.finish_with_message("Index rebuilt successfully");
+        build_catalog_index(true)?;
         return Ok(());
     }
 
@@ -1101,7 +1146,11 @@ fn main() {
             }
         }
         Commands::Status => run_status(),
-        Commands::Ingest { stages, .. } => run_ingest(stages.as_deref()),
+        Commands::Ingest {
+            stages,
+            build_index,
+            ..
+        } => run_ingest(stages.as_deref(), build_index),
         Commands::Search {
             query,
             limit,

@@ -149,10 +149,23 @@ impl Catalog {
             // vectors, so cosine is the right metric and `_distance` comes back
             // as cosine distance (1 - cosine_similarity), which callers turn
             // back into an interpretable similarity score.
+            //
+            // `nprobes`/`refine_factor` only take effect once an IVF-PQ index
+            // exists (ignored on a brute-force scan). They keep the index from
+            // silently degrading quality:
+            //   * nprobes — probe more partitions so the true neighbor isn't
+            //     missed because it sits just across a partition boundary.
+            //   * refine_factor — re-rank the top candidates using full-precision
+            //     vectors, so PQ quantization doesn't distort the reported cosine
+            //     scores. This is essential: scores feed dedup thresholds
+            //     (0.95/0.92) and the UI, and PQ alone makes an exact match read
+            //     ~0.94 instead of ~1.0.
             let results = table
                 .vector_search(query_vector)
                 .map_err(|e| CatalogyError::Database(format!("Vector search setup failed: {}", e)))?
                 .distance_type(lancedb::DistanceType::Cosine)
+                .nprobes(20)
+                .refine_factor(10)
                 .limit(limit)
                 .execute()
                 .await
@@ -262,6 +275,11 @@ impl Catalog {
     }
 
     /// Build an IVF-PQ index on the embedding column.
+    ///
+    /// The index is trained for **cosine** distance to match `search_vector`'s
+    /// query metric — embeddings are L2-normalized CLIP vectors. Building with
+    /// the builder's default (L2) would train partitions/codebooks against the
+    /// wrong geometry and silently degrade recall.
     pub fn build_index(&self, num_partitions: u32) -> Result<()> {
         self.run(async {
             let table = self.open_table().await?;
@@ -271,6 +289,7 @@ impl Catalog {
                     &["embedding"],
                     lancedb::index::Index::IvfPq(
                         lancedb::index::vector::IvfPqIndexBuilder::default()
+                            .distance_type(lancedb::DistanceType::Cosine)
                             .num_partitions(num_partitions),
                     ),
                 )
@@ -907,5 +926,69 @@ mod tests {
         let catalog = Catalog::open(path.to_str().unwrap()).unwrap();
         catalog.batch_upsert(&[]).unwrap();
         assert_eq!(catalog.count().unwrap(), 0);
+    }
+
+    /// Deterministic dense pseudo-random unit vector for row `i` (no rand dep).
+    /// Dense + varied so IVF-PQ k-means has real signal to partition on.
+    fn pseudo_embedding(i: u64, dim: usize) -> Vec<f32> {
+        let mut state = i.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(1);
+        let mut v: Vec<f32> = Vec::with_capacity(dim);
+        for _ in 0..dim {
+            // xorshift64*
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            let r = (state.wrapping_mul(0x2545F4914F6CDD1D) >> 33) as f32 / (1u64 << 31) as f32;
+            v.push(r - 1.0); // roughly [-1, 1]
+        }
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        for x in &mut v {
+            *x /= norm;
+        }
+        v
+    }
+
+    #[test]
+    fn test_build_index_then_search_finds_neighbor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_catalog");
+        let catalog = Catalog::open(path.to_str().unwrap()).unwrap();
+
+        // Enough rows for IVF-PQ to train its partitions and PQ codebooks.
+        let n = 600usize;
+        let records: Vec<CatalogRecord> = (0..n)
+            .map(|i| {
+                let mut r = test_record(&format!("row-{i}"), &format!("hash-{i}"));
+                r.embedding = pseudo_embedding(i as u64, 1024);
+                r
+            })
+            .collect();
+        catalog.batch_upsert(&records).unwrap();
+        assert_eq!(catalog.count().unwrap(), n as u64);
+
+        // Build the ANN index (cosine, sqrt-rows partitions — same heuristic the
+        // CLI uses).
+        let num_partitions = std::cmp::max(1, (n as f64).sqrt() as u32);
+        catalog.build_index(num_partitions).unwrap();
+
+        // Query with an exact copy of a known row's embedding: it must come back,
+        // and as the closest (cosine distance ~0).
+        let target = &records[300];
+        let results = catalog.search_vector(&target.embedding, 10).unwrap();
+        assert!(!results.is_empty(), "indexed search returned nothing");
+
+        let best = results
+            .iter()
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            .unwrap();
+        assert_eq!(best.0.id, target.id, "nearest neighbor should be the query row");
+        // refine_factor re-ranks with full-precision vectors, so even over an
+        // IVF-PQ index an exact match reports ~0 cosine distance (not the ~0.056
+        // PQ-quantized distance it would show without refinement).
+        assert!(
+            best.1 < 1e-3,
+            "exact match should have ~0 cosine distance after refine, got {}",
+            best.1
+        );
     }
 }
