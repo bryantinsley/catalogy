@@ -296,7 +296,7 @@ workers = 4
 hash_algorithm = "sha256"
 
 [server]
-port = 8080
+port = 18080
 host = "127.0.0.1"
 "#
     );

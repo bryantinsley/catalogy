@@ -186,7 +186,7 @@ catalogy status                            # show queue stats, catalog size
 catalogy dedup [--report] [--tier exact|visual|cross-video]  # find duplicates
 catalogy transcode [--dry-run] [--path <dir>]  # transcode videos exceeding thresholds
 catalogy reembed --model <path>            # queue re-embedding with new model
-catalogy serve [--port 8080]               # start HTTP API
+catalogy serve [--port 18080]               # start HTTP API
 catalogy config                            # show/edit config
 ```
 
@@ -391,7 +391,7 @@ archive_dir = ""                    # for "archive" policy: where to move origin
 staging_dir = "~/.local/share/catalogy/transcode_staging"  # local SSD temp space for transcoding
 
 [server]
-port = 8080
+port = 18080
 host = "127.0.0.1"
 ```
 

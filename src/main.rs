@@ -12,6 +12,19 @@ fn shutdown_requested() -> bool {
     SHUTDOWN.load(Ordering::Relaxed)
 }
 
+/// Completes when a shutdown signal (SIGINT/SIGTERM/SIGHUP) has been received.
+///
+/// The process-wide `ctrlc` handler flips the global `SHUTDOWN` flag for all
+/// of those signals; we poll it here rather than installing a second, competing
+/// signal handler. Used to drive `axum`'s graceful shutdown so `systemctl stop`
+/// (SIGTERM) stops the server cleanly instead of waiting for SIGKILL.
+async fn wait_for_shutdown() {
+    while !shutdown_requested() {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    info!("Shutdown signal received — stopping server gracefully");
+}
+
 #[derive(Parser)]
 #[command(
     name = "catalogy",
@@ -140,7 +153,7 @@ enum Commands {
     ///   catalogy serve --port 3000
     Serve {
         /// Port to listen on
-        #[arg(long, default_value = "8080")]
+        #[arg(long, default_value = "18080")]
         port: u16,
     },
 
@@ -689,11 +702,23 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     rt.block_on(async {
         let app = catalogy_server::create_router(state);
         let addr = format!("0.0.0.0:{}", port);
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                format!(
+                    "port {port} is already in use — another process is bound to it. \
+                     Stop it, or run with --port <other-port>."
+                )
+            } else {
+                format!("failed to bind {addr}: {e}")
+            }
+        })?;
         info!(port, "Server listening");
         println!("Catalogy server running at http://localhost:{port}");
         println!("Press Ctrl+C to stop.");
-        axum::serve(listener, app).await?;
+        axum::serve(listener, app)
+            .with_graceful_shutdown(wait_for_shutdown())
+            .await?;
+        info!("Server stopped");
         Ok::<(), Box<dyn std::error::Error>>(())
     })?;
 
@@ -1071,7 +1096,7 @@ fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
         println!("Next steps:");
         println!("  catalogy scan --path ~/Photos");
         println!("  catalogy ingest");
-        println!("  catalogy serve          # then open http://localhost:8080");
+        println!("  catalogy serve          # then open http://localhost:18080");
     } else {
         println!(
             "\u{26a0}  {issues} issue{} found. Fix {} before running ingest.",

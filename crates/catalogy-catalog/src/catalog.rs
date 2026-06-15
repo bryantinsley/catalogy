@@ -17,7 +17,35 @@ const TABLE_NAME: &str = "media";
 /// LanceDB-based catalog storage.
 pub struct Catalog {
     connection: Connection,
-    rt: tokio::runtime::Runtime,
+    rt: BackgroundRuntime,
+}
+
+/// A tokio runtime that shuts down in the background when dropped.
+///
+/// Dropping a plain `tokio::runtime::Runtime` blocks the current thread until
+/// its tasks finish. If that drop happens while *another* runtime is driving
+/// the thread — e.g. this `Catalog` is owned by an axum handler's `AppState`
+/// and gets dropped inside the server's `block_on` (on a bind failure, or on
+/// graceful Ctrl+C shutdown) — tokio panics ("Cannot drop a runtime in a
+/// context where blocking is not allowed"). `shutdown_background` consumes the
+/// runtime without blocking, sidestepping the illegal drop entirely.
+struct BackgroundRuntime(Option<tokio::runtime::Runtime>);
+
+impl BackgroundRuntime {
+    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
+        self.0
+            .as_ref()
+            .expect("runtime is only taken in Drop")
+            .block_on(future)
+    }
+}
+
+impl Drop for BackgroundRuntime {
+    fn drop(&mut self) {
+        if let Some(rt) = self.0.take() {
+            rt.shutdown_background();
+        }
+    }
 }
 
 impl Catalog {
@@ -46,7 +74,10 @@ impl Catalog {
             })
         })?;
 
-        Ok(Self { connection, rt })
+        Ok(Self {
+            connection,
+            rt: BackgroundRuntime(Some(rt)),
+        })
     }
 
     /// Insert or update a single record.

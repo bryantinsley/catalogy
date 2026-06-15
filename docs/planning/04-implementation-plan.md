@@ -232,7 +232,7 @@
 - Search bar → grid of thumbnail results → click to expand
 - Filter controls for media type and date range
 - Embedded in binary via `rust-embed`
-- **Acceptance**: Open browser to localhost:8080, search works, thumbnails load, video plays.
+- **Acceptance**: Open browser to localhost:18080, search works, thumbnails load, video plays.
 
 ---
 

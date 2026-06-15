@@ -1,0 +1,16 @@
+# Dependencies for scripts/export_clip.py — the one-time CLIP -> ONNX export
+# that produces visual.onnx / text.onnx / tokenizer.json for the Rust server.
+# This is the ONLY remaining Python in the project; the runtime is all Rust.
+#
+#   python3 -m venv scripts/.venv && source scripts/.venv/bin/activate
+#   pip install -r scripts/requirements.txt
+#   python scripts/export_clip.py --output-dir ~/.local/share/catalogy/models
+#
+# Weights download on first run (open_clip fetches them); after that the
+# project is strictly offline.
+open-clip-torch>=2.24.0
+torch>=2.1.0
+onnx>=1.15.0
+onnxruntime>=1.17.0
+transformers>=4.38.0
+numpy<2.0.0
