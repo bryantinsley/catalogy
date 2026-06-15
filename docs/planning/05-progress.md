@@ -48,8 +48,26 @@ Models are stored in `~/.local/share/catalogy/models/` (not committed).
 
 ## What's Left
 
-Nothing is actively in-progress. Future ideas from the original spec:
-- Performance tuning for full 4TB library
-- Continuous file watching (inotify/FSEvents)
-- Library analytics dashboard
-- Catalog export/backup
+The phase table above reflects code that *exists*, but not all of it is
+verified, and the user-facing surfaces (HTTP API, web UI, full pipeline) have
+thin test coverage. **See [06-handoff.md](06-handoff.md) for the actionable plan
+to finish.** In short:
+
+- **Verify the "Done" claims**: full scan→ingest→search integration test; ANN
+  index exercised on a real ≥1000-row catalog; fix the re-embed worker's video
+  gap (still embeds the raw file path).
+- **Add tests for what users touch**: HTTP API integration tests (incl.
+  `/api/media/:id` Range support), web-UI end-to-end tests (via chrome-devtools
+  MCP), thumbnail + transcode-decision unit tests.
+- **Integrate or discard the `devel` WIP** (config API + settings UI + transcode
+  trigger, commit `5a1daae`, unverified — SIGTERM-deadlock concern).
+- **Search refinements**: intra-video frame collapsing (distinct moments vs.
+  near-dup frames), real pagination, adaptive pre-fetch.
+
+Recent work (2026-06-15): GPU/CUDA embedding, true-cosine scoring, dynamic-batch
+visual model + batched frame embedding, per-media-item result collapsing, Phase
+4.7 ANN index. Detail in [progress.md](progress.md).
+
+Future ideas from the original spec: full 4TB performance tuning, continuous
+file watching (inotify/FSEvents), library analytics dashboard, catalog
+export/backup.
