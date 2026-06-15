@@ -216,3 +216,69 @@ fn record_to_search_result(record: CatalogRecord, score: f32) -> SearchResult {
         frame_info,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sr(path: &str, mt: MediaType, score: f32, ts: Option<u64>) -> SearchResult {
+        SearchResult {
+            id: uuid::Uuid::now_v7(),
+            score,
+            file_path: PathBuf::from(path),
+            file_name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            media_type: mt,
+            metadata: MediaMetadata {
+                width: None,
+                height: None,
+                duration_ms: None,
+                fps: None,
+                codec: None,
+                bitrate_kbps: None,
+                exif: None,
+            },
+            frame_info: ts.map(|t| FrameInfo {
+                source_video: PathBuf::from(path),
+                frame_index: 0,
+                timestamp_ms: t,
+            }),
+        }
+    }
+
+    #[test]
+    fn test_collapse_keeps_one_per_video_with_best_moment() {
+        // A video: aggregated row + two frame rows; plus a standalone image.
+        let input = vec![
+            sr("/v/a.mp4", MediaType::Video, 0.20, None),
+            sr("/v/a.mp4", MediaType::VideoFrame, 0.50, Some(3000)), // best frame
+            sr("/v/a.mp4", MediaType::VideoFrame, 0.40, Some(9000)),
+            sr("/i/b.jpg", MediaType::Image, 0.30, None),
+        ];
+        let out = collapse_by_media_item(input);
+
+        assert_eq!(out.len(), 2, "one result per distinct media item");
+
+        let vid = out
+            .iter()
+            .find(|r| r.file_path == PathBuf::from("/v/a.mp4"))
+            .unwrap();
+        // Score is the best across all rows, presented as a single video result
+        // anchored to the best-matching moment.
+        assert!((vid.score - 0.50).abs() < 1e-6);
+        assert_eq!(vid.media_type, MediaType::Video);
+        assert_eq!(vid.frame_info.as_ref().unwrap().timestamp_ms, 3000);
+
+        // Image passes through unchanged, with no moment.
+        let img = out
+            .iter()
+            .find(|r| r.file_path == PathBuf::from("/i/b.jpg"))
+            .unwrap();
+        assert_eq!(img.media_type, MediaType::Image);
+        assert!(img.frame_info.is_none());
+    }
+
+    #[test]
+    fn test_collapse_empty() {
+        assert!(collapse_by_media_item(vec![]).is_empty());
+    }
+}
