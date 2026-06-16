@@ -1419,4 +1419,89 @@ mod tests {
         let _ = check_command("echo");
         let _ = check_command("nonexistent_command_12345");
     }
+
+    /// End-to-end test of the `/api/config` GET/POST endpoints through the real
+    /// router. Uses a plain `#[test]` (not `#[tokio::test]`): `Catalog::open`
+    /// drives its own runtime via `block_on`, which panics inside an async
+    /// context, so the catalog is built here and the HTTP calls run on a manual
+    /// runtime below.
+    #[test]
+    fn test_config_endpoints_roundtrip() {
+        use crate::app::{create_router, AppState, ProgressState};
+        use axum::http::Request;
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = Arc::new(
+            catalogy_catalog::Catalog::open(
+                dir.path().join("catalog.lance").to_str().unwrap(),
+            )
+            .unwrap(),
+        );
+        // Point config at a dir that does NOT exist yet, to also exercise the
+        // parent-dir creation in Config::to_file at the HTTP layer.
+        let config_path = dir.path().join("cfg/catalogy/config.toml");
+        let state = Arc::new(AppState {
+            catalog,
+            search_engine: None,
+            state_db_path: None,
+            model_dir: dir.path().join("models"),
+            data_dir: dir.path().to_path_buf(),
+            progress: std::sync::Mutex::new(ProgressState::default()),
+            config: Arc::new(std::sync::RwLock::new(catalogy_core::Config::default())),
+            config_path: config_path.clone(),
+        });
+        let app = create_router(state);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // GET returns the current config.
+            let resp = app
+                .clone()
+                .oneshot(Request::get("/api/config").body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+
+            // POST a valid (existing) library path: succeeds, and creates the
+            // missing config directory on the way.
+            let body = format!(r#"{{"library":{{"paths":["{}"]}}}}"#, dir.path().display());
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/config")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "valid config PUT should succeed");
+            assert!(config_path.exists(), "config should be written even though its dir was missing");
+
+            // GET now reflects the saved path.
+            let resp = app
+                .clone()
+                .oneshot(Request::get("/api/config").body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+            let cfg: catalogy_core::Config = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(cfg.library.paths, vec![dir.path().display().to_string()]);
+
+            // A non-existent library path is rejected with 400.
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/config")
+                        .header("content-type", "application/json")
+                        .body(Body::from(r#"{"library":{"paths":["/no/such/dir/xyz123"]}}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        });
+    }
 }
