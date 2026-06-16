@@ -9,7 +9,7 @@ async function renderDashboard(outlet) {
     <div id="dash-queue" class="section"></div>`;
 
   try {
-    const [setup, stats] = await Promise.all([api.getSetupStatus(), api.getStatsFull()]);
+    const [setup, stats, cfg] = await Promise.all([api.getSetupStatus(), api.getStatsFull(), api.getConfig().catch(() => ({ library: { paths: [] } }))]);
 
     document.getElementById('dash-status').innerHTML =
       statusCard('FFmpeg', setup.ffmpeg, setup.ffmpeg ? 'Available' : 'Not found') +
@@ -26,7 +26,7 @@ async function renderDashboard(outlet) {
 
     document.getElementById('dash-actions').innerHTML = `
       <div class="scan-form">
-        <input type="text" id="scan-path-input" placeholder="Enter directory path..." value="/Volumes/" aria-label="Directory path to scan">
+        <input type="text" id="scan-path-input" placeholder="Enter directory path (or leave empty to scan all libraries)..." value="${cfg.library && cfg.library.paths && cfg.library.paths.length > 0 ? escapeHtml(cfg.library.paths[0]) : ''}" aria-label="Directory path to scan">
         <button class="btn-primary" onclick="promptScan()">Scan</button>
       </div>
       <button class="btn-secondary" onclick="startIngest()">Run Ingest</button>
@@ -50,12 +50,9 @@ async function renderDashboard(outlet) {
 function promptScan() {
   const input = document.getElementById('scan-path-input');
   const path = input ? input.value.trim() : '';
-  if (!path) {
-    showToast('Please enter a directory path.', 'error');
-    return;
-  }
-  api.scan(path).then(() => {
-    showToast('Scan started for ' + path, 'success');
+  // Empty path means scan all configured library paths
+  api.scan(path || null).then(() => {
+    showToast('Scan started' + (path ? ' for ' + path : ' (all libraries)'), 'success');
     renderPage('dashboard');
   }).catch(e => showToast('Scan failed: ' + e.message, 'error'));
 }
@@ -323,5 +320,224 @@ async function renderSetup(outlet) {
     `).join('');
   } catch (e) {
     document.querySelector('#setup-checklist').innerHTML = `<p>Error loading setup status: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+// ── Settings Page ───────────────────────────────────────────
+let settingsConfig = null;
+
+async function renderSettings(outlet) {
+  outlet.innerHTML = `
+    <div class="page-header"><h1>Settings</h1><p>Configure library paths, ingest, and transcoding</p></div>
+    <div id="settings-loading" class="card"><div class="skeleton skeleton-card" style="height:60px"></div></div>
+    <div id="settings-content" style="display:none"></div>`;
+
+  try {
+    settingsConfig = await api.getConfig();
+  } catch (e) {
+    outlet.innerHTML = `<div class="empty-state"><h3>Unable to load config</h3><p>${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  document.getElementById('settings-loading').style.display = 'none';
+  const content = document.getElementById('settings-content');
+  content.style.display = 'block';
+
+  const cfg = settingsConfig;
+
+  // Build library paths rows
+  const paths = cfg.library.paths || [];
+  const pathRows = paths.map((p, i) => `
+    <div class="settings-path-row">
+      <input type="text" class="settings-path-input" value="${escapeHtml(p)}" placeholder="/path/to/media" aria-label="Library path ${i + 1}">
+      <button class="btn-ghost btn-sm" onclick="this.parentElement.remove()" aria-label="Remove path">&times;</button>
+    </div>`).join('');
+
+  // Policy options for original files
+  const policies = ['keep', 'archive', 'delete'];
+
+  content.innerHTML = `
+    <!-- Library Paths -->
+    <div class="section">
+      <div class="section-title">Library Paths</div>
+      <div class="card">
+        <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px">Directories to scan for media files. Paths can use ~ for home directory.</p>
+        <div id="settings-paths-list">${pathRows || '<div class="settings-path-row"><input type="text" class="settings-path-input" placeholder="/path/to/media" aria-label="Library path"><button class="btn-ghost btn-sm" onclick="this.parentElement.remove()" aria-label="Remove path">&times;</button></div>'}</div>
+        <button class="btn-secondary btn-sm" onclick="addPathRow()" style="margin-top:8px">+ Add Path</button>
+      </div>
+    </div>
+
+    <!-- Ingest / Extraction -->
+    <div class="section">
+      <div class="section-title">Ingest & Extraction</div>
+      <div class="card settings-form">
+        <div class="settings-field">
+          <label>Frame Strategy</label>
+          <select id="set-frame-strategy">
+            <option value="adaptive" ${cfg.extraction.frame_strategy === 'adaptive' ? 'selected' : ''}>Adaptive (scene detection)</option>
+            <option value="fixed" ${cfg.extraction.frame_strategy === 'fixed' ? 'selected' : ''}>Fixed interval</option>
+          </select>
+        </div>
+        <div class="settings-field">
+          <label>Scene Threshold</label>
+          <input type="number" id="set-scene-threshold" step="0.05" min="0.05" max="1.0" value="${cfg.extraction.scene_threshold}">
+        </div>
+        <div class="settings-field">
+          <label>Max Interval (seconds)</label>
+          <input type="number" id="set-max-interval" min="5" max="600" value="${cfg.extraction.max_interval_seconds}">
+        </div>
+        <div class="settings-field">
+          <label>Frame Interval (seconds)</label>
+          <input type="number" id="set-frame-interval" min="1" max="300" value="${cfg.extraction.frame_interval_seconds}">
+        </div>
+        <div class="settings-field">
+          <label>Frame Max Dimension</label>
+          <input type="number" id="set-frame-max-dim" min="128" max="2048" value="${cfg.extraction.frame_max_dimension}">
+        </div>
+        <div class="settings-field">
+          <label>Worker Count</label>
+          <input type="number" id="set-workers" min="1" max="32" value="${cfg.ingest.workers}">
+        </div>
+      </div>
+    </div>
+
+    <!-- Transcoding -->
+    <div class="section">
+      <div class="section-title">Transcoding</div>
+      <div class="card settings-form">
+        <div class="settings-field settings-toggle">
+          <label>Enable Transcoding</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="set-tc-enabled" ${cfg.transcode.enabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-field">
+          <label>Max Resolution</label>
+          <select id="set-tc-max-res">
+            <option value="720p" ${cfg.transcode.max_resolution === '720p' ? 'selected' : ''}>720p</option>
+            <option value="1080p" ${cfg.transcode.max_resolution === '1080p' ? 'selected' : ''}>1080p</option>
+            <option value="4k" ${cfg.transcode.max_resolution === '4k' ? 'selected' : ''}>4K</option>
+          </select>
+        </div>
+        <div class="settings-field">
+          <label>Target Codec</label>
+          <select id="set-tc-codec">
+            <option value="h265" ${cfg.transcode.target_codec === 'h265' ? 'selected' : ''}>H.265 / HEVC</option>
+            <option value="h264" ${cfg.transcode.target_codec === 'h264' ? 'selected' : ''}>H.264</option>
+          </select>
+        </div>
+        <div class="settings-field">
+          <label>Target CRF</label>
+          <input type="number" id="set-tc-crf" min="0" max="51" value="${cfg.transcode.target_crf}">
+        </div>
+        <div class="settings-field settings-toggle">
+          <label>Use Hardware Encoder</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="set-tc-hw" ${cfg.transcode.use_hw_encoder ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-field">
+          <label>Original File Policy</label>
+          <select id="set-tc-policy">
+            ${policies.map(p => `<option value="${p}" ${cfg.transcode.original_policy === p ? 'selected' : ''}>${capitalize(p)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="settings-field">
+          <label>Staging Directory</label>
+          <input type="text" id="set-tc-staging" value="${escapeHtml(cfg.transcode.staging_dir)}" placeholder="~/.local/share/catalogy/transcode_staging">
+        </div>
+        <div class="settings-field">
+          <label>Archive Directory <span style="color:var(--text-muted)">(optional)</span></label>
+          <input type="text" id="set-tc-archive" value="${escapeHtml(cfg.transcode.archive_dir || '')}" placeholder="Leave empty to disable archiving">
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="section" style="display:flex;gap:12px;flex-wrap:wrap">
+      <button class="btn-primary" onclick="saveSettings()">Save Configuration</button>
+      <button class="btn-secondary" onclick="runTranscodeDryRun()">Transcode Dry Run</button>
+      <button class="btn-secondary" onclick="runTranscode()">Run Transcode</button>
+    </div>
+    <div id="transcode-result" class="card" style="display:none;margin-top:12px"></div>`;
+}
+
+function addPathRow() {
+  const list = document.getElementById('settings-paths-list');
+  const row = document.createElement('div');
+  row.className = 'settings-path-row';
+  row.innerHTML = `
+    <input type="text" class="settings-path-input" placeholder="/path/to/media" aria-label="Library path">
+    <button class="btn-ghost btn-sm" onclick="this.parentElement.remove()" aria-label="Remove path">&times;</button>`;
+  list.appendChild(row);
+  row.querySelector('input').focus();
+}
+
+async function saveSettings() {
+  const paths = [];
+  document.querySelectorAll('.settings-path-input').forEach(input => {
+    const v = input.value.trim();
+    if (v) paths.push(v);
+  });
+
+  const update = {
+    library: {
+      paths: paths,
+    },
+    extraction: {
+      frame_strategy: document.getElementById('set-frame-strategy').value,
+      scene_threshold: parseFloat(document.getElementById('set-scene-threshold').value),
+      max_interval_seconds: parseInt(document.getElementById('set-max-interval').value),
+      frame_interval_seconds: parseInt(document.getElementById('set-frame-interval').value),
+      frame_max_dimension: parseInt(document.getElementById('set-frame-max-dim').value),
+    },
+    ingest: {
+      workers: parseInt(document.getElementById('set-workers').value),
+    },
+    transcode: {
+      enabled: document.getElementById('set-tc-enabled').checked,
+      max_resolution: document.getElementById('set-tc-max-res').value,
+      target_codec: document.getElementById('set-tc-codec').value,
+      target_crf: parseInt(document.getElementById('set-tc-crf').value),
+      use_hw_encoder: document.getElementById('set-tc-hw').checked,
+      original_policy: document.getElementById('set-tc-policy').value,
+      staging_dir: document.getElementById('set-tc-staging').value.trim(),
+      archive_dir: document.getElementById('set-tc-archive').value.trim() || null,
+    },
+  };
+
+  try {
+    const res = await api.saveConfig(update);
+    showToast(res.message || 'Configuration saved!', 'success');
+    // Refresh dashboard if visible
+    if (state.currentPage === 'dashboard') {
+      renderPage('dashboard');
+    }
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function runTranscodeDryRun() {
+  const resultEl = document.getElementById('transcode-result');
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '<div class="skeleton skeleton-card" style="height:40px"></div>';
+
+  try {
+    const res = await api.transcode(true);
+    resultEl.innerHTML = `<div style="color:var(--cyan)">${escapeHtml(res.message)}</div>`;
+  } catch (e) {
+    resultEl.innerHTML = `<div style="color:var(--error)">Error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function runTranscode() {
+  try {
+    const res = await api.transcode(false);
+    showToast(res.message || 'Transcode started', 'success');
+  } catch (e) {
+    showToast('Transcode failed: ' + e.message, 'error');
   }
 }

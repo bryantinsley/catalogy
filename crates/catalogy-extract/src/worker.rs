@@ -34,7 +34,7 @@ fn strategy_from_config(config: &ExtractionConfig) -> ExtractionStrategy {
             seconds: config.frame_interval_seconds,
         },
         _ => ExtractionStrategy::Adaptive {
-            scene_threshold: config.scene_threshold,
+            scene_threshold: config.scene_threshold as f32,
             max_interval_seconds: config.max_interval_seconds,
         },
     }
@@ -302,7 +302,7 @@ mod tests {
                 scene_threshold,
                 max_interval_seconds,
             } => {
-                assert!((scene_threshold - 0.4).abs() < f32::EPSILON);
+                assert!((scene_threshold - 0.4_f32).abs() < f32::EPSILON);
                 assert_eq!(max_interval_seconds, 30);
             }
             _ => panic!("Expected Adaptive strategy"),

@@ -404,6 +404,20 @@ impl StateDb {
         Ok(count as u64)
     }
 
+    /// Bulk-skip all pending jobs for a given stage (e.g., when models are missing).
+    pub fn skip_pending_for_stage(&self, stage: JobStage) -> Result<u64> {
+        let stage_str = stage_to_str(&stage);
+        let now = chrono::Utc::now().to_rfc3339();
+        let count = self
+            .conn
+            .execute(
+                "UPDATE jobs SET status = 'skipped', completed_at = ?2 WHERE stage = ?1 AND status = 'pending'",
+                params![stage_str, now],
+            )
+            .map_err(|e| CatalogyError::Database(e.to_string()))?;
+        Ok(count as u64)
+    }
+
     /// Get queue statistics.
     pub fn stats(&self) -> Result<QueueStats> {
         let mut stats = QueueStats::default();

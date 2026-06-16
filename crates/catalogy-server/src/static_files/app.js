@@ -21,8 +21,11 @@ const api = {
   getBrowse(params) { return this.get('/api/browse?' + new URLSearchParams(params)); },
   getDedup(params) { return this.get('/api/dedup?' + new URLSearchParams(params)); },
   search(query, limit) { return this.post('/api/search', { query, limit: limit || 20 }); },
-  scan(path) { return this.post('/api/scan', { path }); },
+  scan(path) { return this.post('/api/scan', { path: path || null }); },
   ingest(stages) { return this.post('/api/ingest', { stages: stages || null }); },
+  getConfig() { return this.get('/api/config'); },
+  saveConfig(body) { return this.post('/api/config', body); },
+  transcode(dryRun) { return this.post('/api/transcode', { dry_run: dryRun || false }); },
 };
 
 // ── Shared State ───────────────────────────────────────────
@@ -81,6 +84,7 @@ const routes = {
   'search': 'search',
   'duplicates': 'duplicates',
   'setup': 'setup',
+  'settings': 'settings',
 };
 
 function navigate(hash) {
@@ -108,6 +112,7 @@ function renderPage(page) {
     case 'search': renderSearch(outlet); break;
     case 'duplicates': renderDuplicates(outlet); break;
     case 'setup': renderSetup(outlet); break;
+    case 'settings': renderSettings(outlet); break;
     default: outlet.innerHTML = '<div class="empty-state"><h3>Page not found</h3></div>';
   }
 }

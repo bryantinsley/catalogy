@@ -145,7 +145,8 @@ pub struct FileInfo {
 
 #[derive(Deserialize)]
 pub struct ScanRequest {
-    pub path: String,
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -327,12 +328,15 @@ pub async fn thumb_handler(
 pub async fn stats_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<StatsResponse>, (StatusCode, String)> {
-    let total = state.catalog.count().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Stats error: {}", e),
-        )
-    })?;
+    let total = state
+        .catalog
+        .count()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Stats error: {}", e),
+            )
+        })?;
 
     Ok(Json(StatsResponse { total_items: total }))
 }
@@ -380,29 +384,23 @@ pub async fn dedup_handler(
     };
 
     let visual = if run_visual {
-        Some(
-            catalogy_dedup::find_visual_duplicates(&state.catalog, threshold).map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Visual dedup error: {}", e),
-                )
-            })?,
-        )
+        Some(catalogy_dedup::find_visual_duplicates(&state.catalog, threshold).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Visual dedup error: {}", e),
+            )
+        })?)
     } else {
         None
     };
 
     let cross_video = if run_cross {
-        Some(
-            catalogy_dedup::find_cross_video_duplicates(&state.catalog, threshold).map_err(
-                |e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Cross-video dedup error: {}", e),
-                    )
-                },
-            )?,
-        )
+        Some(catalogy_dedup::find_cross_video_duplicates(&state.catalog, threshold).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Cross-video dedup error: {}", e),
+            )
+        })?)
     } else {
         None
     };
@@ -691,8 +689,35 @@ pub async fn scan_handler(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ScanRequest>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
-    let scan_path = req.path.clone();
     let data_dir = state.data_dir.clone();
+
+    // Read config once, before spawning blocking task
+    let cfg = state.config.read().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Config lock poisoned: {}", e),
+        )
+    })?;
+
+    // Resolve paths: explicit request path, or fall back to library paths from config
+    let paths: Vec<String> = if let Some(p) = req.path {
+        vec![p]
+    } else {
+        let lib_paths = cfg.library.paths.clone();
+        if lib_paths.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "No library paths configured. Add paths in Settings or provide a path parameter.".to_string(),
+            ));
+        }
+        lib_paths
+    };
+
+    let image_exts = cfg.library.extensions_image.clone();
+    let video_exts = cfg.library.extensions_video.clone();
+    drop(cfg);
+
+    let progress_ref = Arc::clone(&state);
 
     {
         let mut progress = state.progress.lock().unwrap();
@@ -700,11 +725,10 @@ pub async fn scan_handler(
         progress.stage = None;
         progress.processed = 0;
         progress.total = 0;
-        progress.message = format!("Scanning {}", scan_path);
+        progress.message = format!("Scanning {} path(s)...", paths.len());
     }
 
-    let progress_ref = Arc::clone(&state);
-
+    let paths_for_msg = paths.len();
     tokio::task::spawn_blocking(move || {
         let db_path = data_dir.join("state.db");
         let db = match catalogy_queue::StateDb::open(&db_path) {
@@ -717,50 +741,53 @@ pub async fn scan_handler(
             }
         };
 
-        let image_exts: Vec<String> = vec![
-            "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif", "avif",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
-        let video_exts: Vec<String> = vec![
-            "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "mpg", "mpeg",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
+        let mut total_found = 0u64;
+        for scan_path in &paths {
+            let expanded = shellexpand::full(scan_path)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| scan_path.clone());
 
-        let root = std::path::Path::new(&scan_path);
-        match catalogy_scanner::scan_directory(root, &image_exts, &video_exts) {
-            Ok(scanned) => {
-                {
-                    let mut progress = progress_ref.progress.lock().unwrap();
-                    progress.total = scanned.len() as u64;
-                    progress.message =
-                        format!("Found {} files, detecting changes...", scanned.len());
-                }
+            let mut progress = progress_ref.progress.lock().unwrap();
+            progress.message = format!("Scanning {}...", expanded);
 
-                let changes = catalogy_queue::detect_changes(&db, &scanned);
-                if let Ok(changes) = changes {
-                    let _ = catalogy_queue::apply_changes_and_enqueue(&db, &changes);
-                    let _ = db.set_config("last_scan_time", &chrono::Utc::now().to_rfc3339());
-                }
-
+            let root = std::path::Path::new(&expanded);
+            if !root.exists() {
                 let mut progress = progress_ref.progress.lock().unwrap();
-                progress.op_type = "idle".to_string();
-                progress.message = "Scan complete".to_string();
+                progress.message = format!("Path not found: {}", expanded);
+                continue;
             }
-            Err(e) => {
-                let mut progress = progress_ref.progress.lock().unwrap();
-                progress.op_type = "idle".to_string();
-                progress.message = format!("Scan failed: {}", e);
+
+            match catalogy_scanner::scan_directory(root, &image_exts, &video_exts) {
+                Ok(scanned) => {
+                    total_found += scanned.len() as u64;
+                    let changes = match catalogy_queue::detect_changes(&db, &scanned) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let mut progress = progress_ref.progress.lock().unwrap();
+                            progress.message = format!("Change detection failed: {}", e);
+                            continue;
+                        }
+                    };
+                    let _ = catalogy_queue::apply_changes_and_enqueue(&db, &changes);
+                }
+                Err(e) => {
+                    let mut progress = progress_ref.progress.lock().unwrap();
+                    progress.message = format!("Scan error on {}: {}", expanded, e);
+                }
             }
         }
+
+        let _ = db.set_config("last_scan_time", &chrono::Utc::now().to_rfc3339());
+
+        let mut progress = progress_ref.progress.lock().unwrap();
+        progress.op_type = "idle".to_string();
+        progress.total = total_found;
+        progress.message = format!("Scan complete — {} files found", total_found);
     });
 
     Ok(Json(ActionResponse {
         ok: true,
-        message: "Scan started".to_string(),
+        message: format!("Scan started for {} path(s)", paths_for_msg),
     }))
 }
 
@@ -772,6 +799,17 @@ pub async fn ingest_handler(
     let model_dir = state.model_dir.clone();
     let stages = req.stages.clone();
     let embed_session = state.search_engine.as_ref().map(|se| se.embed_session());
+
+    // Snapshot extraction config from live config
+    let extraction_config = {
+        let cfg = state.config.read().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Config lock poisoned: {}", e),
+            )
+        })?;
+        cfg.extraction.clone()
+    };
 
     {
         let mut progress = state.progress.lock().unwrap();
@@ -786,8 +824,8 @@ pub async fn ingest_handler(
 
     tokio::task::spawn_blocking(move || {
         let db_path = data_dir.join("state.db");
-        let db = match catalogy_queue::StateDb::open(&db_path) {
-            Ok(db) => db,
+        let db: Arc<catalogy_queue::StateDb> = match catalogy_queue::StateDb::open(&db_path) {
+            Ok(db) => Arc::new(db),
             Err(e) => {
                 let mut progress = progress_ref.progress.lock().unwrap();
                 progress.op_type = "idle".to_string();
@@ -811,7 +849,7 @@ pub async fn ingest_handler(
                 progress.stage = Some("metadata".to_string());
                 progress.message = "Extracting metadata...".to_string();
             }
-            let ffprobe = catalogy_metadata::find_ffprobe(None);
+            let ffprobe = catalogy_metadata::find_ffprobe(extraction_config.ffprobe_path.as_deref());
             let _ = catalogy_metadata::run_metadata_worker(&db, ffprobe.as_deref(), true);
         }
 
@@ -821,17 +859,9 @@ pub async fn ingest_handler(
                 progress.stage = Some("frames".to_string());
                 progress.message = "Extracting frames...".to_string();
             }
-            let config = catalogy_core::ExtractionConfig {
-                frame_strategy: "adaptive".to_string(),
-                scene_threshold: 0.3,
-                max_interval_seconds: 60,
-                frame_interval_seconds: 30,
-                frame_max_dimension: 512,
-                dedup_similarity_threshold: 0.95,
-                ffprobe_path: None,
-                thumbnail_dir: data_dir.join("thumbnails").to_string_lossy().to_string(),
-            };
-            let _ = catalogy_extract::run_extract_frames_worker(&db, &config, "worker-web");
+            let mut extract_cfg = extraction_config.clone();
+            extract_cfg.thumbnail_dir = data_dir.join("thumbnails").to_string_lossy().to_string();
+            let _ = catalogy_extract::run_extract_frames_worker(&db, &extract_cfg, "worker-web");
         }
 
         if should_run("embed") {
@@ -873,6 +903,14 @@ pub async fn ingest_handler(
                         0.95,
                     );
                 }
+            } else {
+                // No models available — skip pending embed and index jobs so they don't
+                // sit in the queue forever. They'll be re-enqueued on the next scan/ingest
+                // once models are present.
+                let _ = db.skip_pending_for_stage(catalogy_core::JobStage::Embed);
+                let _ = db.skip_pending_for_stage(catalogy_core::JobStage::Index);
+                let mut progress = progress_ref.progress.lock().unwrap();
+                progress.message = "Embed skipped — CLIP models not found. Run `catalogy setup` or set CATALOGY_MODEL_DIR.".to_string();
             }
         }
 
@@ -952,40 +990,12 @@ pub async fn browse_handler(
         )
     })?;
 
-    // Filter by media type
-    let filtered: Vec<_> = all_records
-        .into_iter()
-        .filter(|r| {
-            if r.tombstone {
-                return false;
-            }
-            if params.media_type == "all" {
-                true
-            } else if params.media_type == "image" {
-                r.media_type == "image"
-            } else if params.media_type == "video" {
-                r.media_type == "video" || r.media_type == "video_frame"
-            } else {
-                true
-            }
-        })
-        .collect();
-
-    let total = filtered.len() as u64;
+    let total = all_records.len() as u64;
     let page = params.page.max(1);
     let per_page = params.per_page.clamp(1, 200);
     let skip = ((page - 1) * per_page) as usize;
 
-    let mut sorted = filtered;
-    match params.sort.as_str() {
-        "name" => {
-            sorted.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()))
-        }
-        "size" => sorted.sort_by(|a, b| b.file_size.cmp(&a.file_size)),
-        _ => sorted.sort_by(|a, b| b.indexed_at.cmp(&a.indexed_at)),
-    }
-
-    let items: Vec<BrowseItem> = sorted
+    let items: Vec<BrowseItem> = all_records
         .into_iter()
         .skip(skip)
         .take(per_page as usize)
@@ -1002,6 +1012,179 @@ pub async fn browse_handler(
         .collect();
 
     Ok(Json(BrowseResponse { items, total, page }))
+}
+
+// ── Config endpoints ─────────────────────────────────────────
+
+pub async fn config_get_handler(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<catalogy_core::Config>, (StatusCode, String)> {
+    let config = state.config.read().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Config lock poisoned: {}", e),
+        )
+    })?;
+    Ok(Json(config.clone()))
+}
+
+pub async fn config_put_handler(
+    State(state): State<Arc<AppState>>,
+    Json(update): Json<catalogy_core::Config>,
+) -> Result<Json<ActionResponse>, (StatusCode, String)> {
+    let config_path = state.config_path.clone();
+
+    // Validate library paths exist
+    for path in &update.library.paths {
+        let expanded = shellexpand::full(path)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|_| path.clone());
+        let p = std::path::Path::new(&expanded);
+        if !p.exists() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Library path does not exist: {}", expanded),
+            ));
+        }
+        if !p.is_dir() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Library path is not a directory: {}", expanded),
+            ));
+        }
+    }
+
+    // Merge update into existing config
+    {
+        let mut config = state.config.write().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Config lock poisoned: {}", e),
+            )
+        })?;
+        config.merge(&update);
+
+        // Persist to disk
+        config
+            .to_file(&config_path.to_string_lossy())
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to write config: {}", e),
+                )
+            })?;
+    }
+
+    Ok(Json(ActionResponse {
+        ok: true,
+        message: "Configuration updated".to_string(),
+    }))
+}
+
+// ── Transcode endpoint ───────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct TranscodeRequest {
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+pub async fn transcode_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TranscodeRequest>,
+) -> Result<Json<ActionResponse>, (StatusCode, String)> {
+    let data_dir = state.data_dir.clone();
+    let config = state.config.clone();
+
+    if req.dry_run {
+        let config_read = config.read().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Config lock poisoned: {}", e),
+            )
+        })?;
+        let tc_config = config_read.transcode.clone();
+        drop(config_read);
+
+        let db_path = data_dir.join("state.db");
+        let db = catalogy_queue::StateDb::open(&db_path).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", e),
+            )
+        })?;
+
+        let entries = catalogy_transcode::run_transcode_dry_run(&db, &tc_config).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Transcode dry-run error: {}", e),
+            )
+        })?;
+
+        let transcode_count = entries.iter().filter(|e| matches!(e.decision, catalogy_transcode::TranscodeDecision::Transcode { .. })).count();
+
+        return Ok(Json(ActionResponse {
+            ok: true,
+            message: format!("{} videos evaluated, {} would be transcoded", entries.len(), transcode_count),
+        }));
+    }
+
+    // Live transcode run
+    {
+        let mut progress = state.progress.lock().unwrap();
+        progress.op_type = "transcode".to_string();
+        progress.stage = None;
+        progress.processed = 0;
+        progress.total = 0;
+        progress.message = "Starting transcode...".to_string();
+    }
+
+    let progress_ref = Arc::clone(&state);
+    let config_clone = state.config.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let db_path = data_dir.join("state.db");
+        let db = match catalogy_queue::StateDb::open(&db_path) {
+            Ok(db) => db,
+            Err(e) => {
+                let mut progress = progress_ref.progress.lock().unwrap();
+                progress.op_type = "idle".to_string();
+                progress.message = format!("Transcode failed: {}", e);
+                return;
+            }
+        };
+
+        let tc_config = match config_clone.read() {
+            Ok(cfg) => cfg.transcode.clone(),
+            Err(_) => {
+                let mut progress = progress_ref.progress.lock().unwrap();
+                progress.op_type = "idle".to_string();
+                progress.message = "Config lock error".to_string();
+                return;
+            }
+        };
+
+        match catalogy_transcode::run_transcode_worker(&db, &tc_config, "worker-web") {
+            Ok(stats) => {
+                let mut progress = progress_ref.progress.lock().unwrap();
+                progress.op_type = "idle".to_string();
+                progress.message = format!(
+                    "Transcode complete: {} done, {} skipped, {} failed",
+                    stats.completed, stats.skipped, stats.failed
+                );
+            }
+            Err(e) => {
+                let mut progress = progress_ref.progress.lock().unwrap();
+                progress.op_type = "idle".to_string();
+                progress.message = format!("Transcode error: {}", e);
+            }
+        }
+    });
+
+    Ok(Json(ActionResponse {
+        ok: true,
+        message: "Transcode started".to_string(),
+    }))
 }
 
 #[cfg(test)]
@@ -1209,7 +1392,14 @@ mod tests {
     fn test_scan_request_deserialize() {
         let json = r#"{"path": "/home/user/photos"}"#;
         let req: ScanRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.path, "/home/user/photos");
+        assert_eq!(req.path, Some("/home/user/photos".to_string()));
+    }
+
+    #[test]
+    fn test_scan_request_no_path() {
+        let json = r#"{}"#;
+        let req: ScanRequest = serde_json::from_str(json).unwrap();
+        assert!(req.path.is_none());
     }
 
     #[test]

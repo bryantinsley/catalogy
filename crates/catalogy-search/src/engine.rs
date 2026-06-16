@@ -8,6 +8,7 @@ use catalogy_core::{
 use catalogy_embed::EmbedSession;
 
 /// Hybrid search engine combining vector similarity with scalar filters.
+#[derive(Clone)]
 pub struct SearchEngine {
     embed_session: Arc<EmbedSession>,
     catalog: Arc<Catalog>,
@@ -120,14 +121,6 @@ impl SearchEngine {
     }
 }
 
-/// Collapse multiple catalog rows for the same media item into one result.
-///
-/// Videos produce one aggregated `video` row plus one `video_frame` row per kept
-/// frame, all sharing the same `file_path`. Returning them separately floods the
-/// results with near-duplicates, so we keep a single result per `file_path`: the
-/// highest-scoring row as the representative, with `frame_info` set to the
-/// best-scoring frame (the moment to jump to). Images have a unique `file_path`
-/// and pass through unchanged.
 /// Whether a catalog row of `record_type` satisfies a `filter_type` request.
 ///
 /// A `Video` filter intentionally also matches `VideoFrame` rows: frames are how
@@ -139,6 +132,14 @@ fn media_type_matches(filter_type: &MediaType, record_type: &MediaType) -> bool 
         || (*filter_type == MediaType::Video && *record_type == MediaType::VideoFrame)
 }
 
+/// Collapse multiple catalog rows for the same media item into one result.
+///
+/// Videos produce one aggregated `video` row plus one `video_frame` row per kept
+/// frame, all sharing the same `file_path`. Returning them separately floods the
+/// results with near-duplicates, so we keep a single result per `file_path`: the
+/// highest-scoring row as the representative, with `frame_info` set to the
+/// best-scoring frame (the moment to jump to). Images have a unique `file_path`
+/// and pass through unchanged.
 fn collapse_by_media_item(results: Vec<SearchResult>) -> Vec<SearchResult> {
     use std::collections::HashMap;
 

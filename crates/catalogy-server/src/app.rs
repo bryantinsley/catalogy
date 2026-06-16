@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 use catalogy_catalog::Catalog;
+use catalogy_core::Config;
 use catalogy_search::SearchEngine;
 
 use crate::api;
@@ -35,6 +36,8 @@ pub struct AppState {
     pub model_dir: PathBuf,
     pub data_dir: PathBuf,
     pub progress: std::sync::Mutex<ProgressState>,
+    pub config: Arc<std::sync::RwLock<Config>>,
+    pub config_path: PathBuf,
 }
 
 pub fn create_router(state: Arc<AppState>) -> Router {
@@ -53,6 +56,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ingest", post(api::ingest_handler))
         .route("/api/progress", get(api::progress_handler))
         .route("/api/browse", get(api::browse_handler))
+        // Config & transcode
+        .route("/api/config", get(api::config_get_handler))
+        .route("/api/config", post(api::config_put_handler))
+        .route("/api/transcode", post(api::transcode_handler))
         // Static files
         .route("/", get(index_handler))
         .route("/{*path}", get(static_handler))

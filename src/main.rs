@@ -505,7 +505,7 @@ fn run_ingest(
                 "1",
                 "worker-main",
                 &frames_meta_dir,
-                config.dedup_similarity_threshold,
+                config.dedup_similarity_threshold as f32,
             )?;
             pb.finish_with_message(format!("Processed {count} embed jobs"));
             info!(count, "embed stage complete");
@@ -660,6 +660,14 @@ fn run_dedup(tier: &str, threshold: f32) -> Result<(), Box<dyn std::error::Error
 }
 
 fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let config_path = default_config_path();
+    let config = if config_path.exists() {
+        catalogy_core::Config::from_file(&config_path.to_string_lossy())
+            .map_err(|e| format!("Failed to load config: {}", e))?
+    } else {
+        catalogy_core::Config::default()
+    };
+
     let catalog = Arc::new(catalogy_catalog::Catalog::open(
         &catalog_path().to_string_lossy(),
     )?);
@@ -696,6 +704,8 @@ fn run_serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         model_dir: mdir,
         data_dir: default_data_dir(),
         progress: std::sync::Mutex::new(Default::default()),
+        config: Arc::new(std::sync::RwLock::new(config)),
+        config_path,
     });
 
     let rt = tokio::runtime::Runtime::new()?;
