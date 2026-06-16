@@ -87,21 +87,20 @@ them (the user explicitly called these out):
 - **CLI/help nit:** `search --type` is surfaced as `--media-type` in help text;
   reconcile.
 
-## Decision: the devel WIP (config API + settings UI + transcode trigger)
-`devel` (`5a1daae`) has a genuinely useful feature set but is unverified and may
-contain the SIGTERM-deadlock regression the memory note warns about. Recommended
-path:
-1. Branch from current `main`, then cherry-pick / re-apply the devel changes in
-   small, reviewable chunks (`config.rs` schema first, then API handlers, then
-   UI), building and testing each.
-2. Specifically re-audit the `catalog.rs` rewrite against the current
-   `catalog.rs` (which now has the `BackgroundRuntime` async-drop fix + ANN
-   index + refine) — do **not** blindly take the devel version; it predates
-   those fixes and may reintroduce the serve panic / deadlock.
-3. Add a shutdown test (Phase 9.1: SIGTERM during `serve` exits cleanly) to lock
-   the regression out for good.
-If on review the rewrite is not worth salvaging, discard `devel` — nothing on it
-is pushed.
+## ~~Decision: the devel WIP~~ — DONE (integrated 2026-06-16)
+The useful slice of the devel WIP (config-management API, settings UI,
+transcode trigger, config-driven scan/ingest) was re-applied onto `main` and is
+deployed: see commits `dca2c3f` + `9561256`. The `catalog.rs` rewrite was
+**deliberately discarded** (it predated `main`'s `BackgroundRuntime` async-drop
+fix + ANN index + refine, and carried the SIGTERM-deadlock risk). A
+`Config::to_file` ENOENT bug found during integration was fixed (creates the
+config dir). Covered by `tests/config_api.rs` + a `Config::to_file` unit test.
+The `devel` branch (`5a1daae`, unpushed) is now superseded — its only unique
+remaining content is the rejected rewrite; safe to delete.
+
+**Still owed here:** a shutdown test (Phase 9.1: SIGTERM during `serve` exits
+cleanly) to lock out the deadlock class for good, and web-UI E2E coverage of the
+new Settings page.
 
 ## Priority 4 — The real-library run (the payoff)
 Point ingest at a real library directory and let it run on the GPU. This both
